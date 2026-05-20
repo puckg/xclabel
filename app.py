@@ -22,6 +22,8 @@ import argparse
 app = Flask(__name__)
 CORS(app)
 
+app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024
+
 # 应用版本号
 APP_VERSION = "v3.0"
 
@@ -923,110 +925,90 @@ def upload_labelme_dataset():
         annotations = {}
         if os.path.exists(ANNOTATIONS_FILE):
             with open(ANNOTATIONS_FILE, 'r', encoding='utf-8') as f:
-                annotations = json.load(f)
+                try:
+                    annotations = json.load(f)
+                except json.JSONDecodeError:
+                    annotations = {}
         
         # 获取已有类别名称集合，便于快速查找
         existing_class_names = {cls['name'] for cls in classes}
         
         # 处理上传的文件
+        # webkitdirectory可能导致文件名包含相对路径，需要提取纯文件名
         image_files = {}
         json_files = {}
         
         for file in files:
             if file.filename != '':
                 filename = file.filename or ''
-                if filename.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.gif')):
-                    image_files[filename] = file
-                elif filename.lower().endswith('.json'):
-                    json_files[filename] = file
+                pure_filename = filename.replace('\\', '/').split('/')[-1]
+                if not pure_filename:
+                    continue
+                if pure_filename.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.gif')):
+                    image_files[pure_filename] = file
+                elif pure_filename.lower().endswith('.json'):
+                    json_files[pure_filename] = file
+        
+        # 确保上传目录存在
+        os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+        
+        # 已处理的JSON文件集合，避免重复处理
+        processed_json_files = set()
         
         # 处理图像文件
         for image_filename, image_file in image_files.items():
-            # 保存图像文件
             image_path = os.path.join(app.config['UPLOAD_FOLDER'], image_filename)
             image_file.save(image_path)
             uploaded_files.append(image_filename)
             
-            # 查找对应的JSON文件
             json_filename = os.path.splitext(image_filename)[0] + '.json'
             if json_filename in json_files:
-                # 读取并解析JSON文件
                 json_file = json_files[json_filename]
                 json_content = json.loads(json_file.read().decode('utf-8'))
+                processed_json_files.add(json_filename)
                 
-                # 解析LabelMe标注格式
-                image_annotations = []
-                if 'shapes' in json_content:
-                    for shape in json_content['shapes']:
-                        label = shape.get('label', '')
-                        points = shape.get('points', [])
-                        
-                        # 如果标签不存在于现有类别中，添加它
-                        if label and label not in existing_class_names:
-                            # 为新类别分配一个默认颜色
-                            new_color = '#{:06x}'.format(hash(label) % 0x1000000)
-                            classes.append({'name': label, 'color': new_color})
-                            existing_class_names.add(label)
-                        
-                        # 将points转换为我们的内部格式
-                        if points and label:
-                            # 查找标签的颜色
-                            color = '#000000'  # 默认颜色
-                            for cls in classes:
-                                if cls['name'] == label:
-                                    color = cls['color']
-                                    break
-                            
-                            # 确定形状类型
-                            shape_type = shape.get('shape_type', 'polygon')
-                            
-                            # 转换为我们的内部格式
-                            internal_points = points
-                            internal_type = shape_type
-                            
-                            # 处理矩形：LabelMe矩形只有2个点，我们需要转换为4个点的矩形
-                            if shape_type == 'rectangle' and len(points) == 2:
-                                x1, y1 = points[0]
-                                x2, y2 = points[1]
-                                internal_points = [
-                                    [x1, y1],
-                                    [x2, y1],
-                                    [x2, y2],
-                                    [x1, y2]
-                                ]
-                                internal_type = 'rectangle'
-                            elif shape_type == 'circle' and len(points) == 2:
-                                # 处理圆形，转换为多边形（简化处理）
-                                cx, cy = points[0]
-                                radius = ((points[1][0] - cx) ** 2 + (points[1][1] - cy) ** 2) ** 0.5
-                                # 转换为16边形近似圆形
-                                internal_points = []
-                                for i in range(16):
-                                    angle = (i / 16) * 2 * 3.14159
-                                    x = cx + radius * math.cos(angle)
-                                    y = cy + radius * math.sin(angle)
-                                    internal_points.append([x, y])
-                                internal_type = 'polygon'
-                            elif shape_type == 'line' and len(points) >= 2:
-                                internal_type = 'line'
-                            else:
-                                internal_type = 'polygon'
-                            
-                            # 创建标注对象
-                            annotation = {
-                                'class': label,
-                                'color': color,
-                                'points': internal_points,
-                                'type': internal_type
-                            }
-                            image_annotations.append(annotation)
+                image_annotations = _parse_labelme_shapes(json_content, classes, existing_class_names)
                 
-                # 保存此图像的标注
                 annotations[image_filename] = image_annotations
                 processed_annotations += 1
         
+        # 处理未匹配到图片文件的JSON文件（可能包含imageData）
+        for json_filename, json_file in json_files.items():
+            if json_filename in processed_json_files:
+                continue
+            
+            try:
+                json_content = json.loads(json_file.read().decode('utf-8'))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                continue
+            
+            image_data = json_content.get('imageData')
+            image_path_in_json = json_content.get('imagePath', '')
+            
+            image_filename = None
+            if image_path_in_json:
+                image_filename = image_path_in_json.replace('\\', '/').split('/')[-1]
+            
+            if not image_filename:
+                base_name = os.path.splitext(json_filename)[0]
+                image_filename = base_name + '.png'
+            
+            if image_data:
+                try:
+                    image_bytes = base64.b64decode(image_data)
+                    image_save_path = os.path.join(app.config['UPLOAD_FOLDER'], image_filename)
+                    with open(image_save_path, 'wb') as f:
+                        f.write(image_bytes)
+                    uploaded_files.append(image_filename)
+                except Exception:
+                    continue
+            
+            image_annotations = _parse_labelme_shapes(json_content, classes, existing_class_names)
+            
+            annotations[image_filename] = image_annotations
+            processed_annotations += 1
+        
         # 保存更新后的类别和标注信息
-        # 确保ANNOTATIONS_FOLDER目录存在
         os.makedirs(ANNOTATIONS_FOLDER, exist_ok=True)
         with open(CLASSES_FILE, 'w', encoding='utf-8') as f:
             json.dump(classes, f, indent=2)
@@ -1041,7 +1023,72 @@ def upload_labelme_dataset():
         })
         
     except Exception as e:
+        traceback.print_exc()
         return jsonify({'error': f'Failed to process LabelMe dataset: {str(e)}'}), 500
+
+
+def _parse_labelme_shapes(json_content, classes, existing_class_names):
+    """解析LabelMe JSON中的shapes标注，返回内部标注格式列表"""
+    image_annotations = []
+    if 'shapes' not in json_content:
+        return image_annotations
+    
+    for shape in json_content['shapes']:
+        label = shape.get('label', '')
+        points = shape.get('points', [])
+        
+        if label and label not in existing_class_names:
+            new_color = '#{:06x}'.format(hash(label) % 0x1000000)
+            classes.append({'name': label, 'color': new_color})
+            existing_class_names.add(label)
+        
+        if not points or not label:
+            continue
+        
+        color = '#000000'
+        for cls in classes:
+            if cls['name'] == label:
+                color = cls['color']
+                break
+        
+        shape_type = shape.get('shape_type', 'polygon')
+        internal_points = points
+        internal_type = shape_type
+        
+        if shape_type == 'rectangle' and len(points) == 2:
+            x1, y1 = points[0]
+            x2, y2 = points[1]
+            internal_points = [
+                [x1, y1],
+                [x2, y1],
+                [x2, y2],
+                [x1, y2]
+            ]
+            internal_type = 'rectangle'
+        elif shape_type == 'circle' and len(points) == 2:
+            cx, cy = points[0]
+            radius = ((points[1][0] - cx) ** 2 + (points[1][1] - cy) ** 2) ** 0.5
+            internal_points = []
+            for i in range(16):
+                angle = (i / 16) * 2 * 3.14159
+                x = cx + radius * math.cos(angle)
+                y = cy + radius * math.sin(angle)
+                internal_points.append([x, y])
+            internal_type = 'polygon'
+        elif shape_type == 'line' and len(points) >= 2:
+            internal_type = 'line'
+        else:
+            internal_type = 'polygon'
+        
+        annotation = {
+            'class': label,
+            'color': color,
+            'points': internal_points,
+            'type': internal_type
+        }
+        image_annotations.append(annotation)
+    
+    return image_annotations
         
 
 @app.route('/api/ai-label', methods=['POST'])

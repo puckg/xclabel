@@ -343,11 +343,11 @@
                 <div class="tab-pane" id="labelme-tab">
                     <div class="upload-area" id="labelmeUploadArea">
                         <i class="fas fa-file-code fa-3x"></i>
-                        <p>拖拽LabelMe数据集文件到此处或点击选择文件夹</p>
+                        <p>拖拽LabelMe数据集文件到此处或点击选择文件</p>
                         <input type="file" id="labelmeInput" multiple style="display: none;">
                         <button id="selectLabelMeBtn" class="btn btn-primary">选择labelme数据集</button>
                         <div class="info-text">
-                            <p><strong>说明：</strong>请选择包含图片和对应JSON标注文件的labelme数据集文件夹</p>
+                            <p><strong>说明：</strong>请选择包含图片和对应JSON标注文件的labelme数据集文件（可多选）</p>
                         </div>
                     </div>
                     <div class="upload-actions" style="margin-top: 15px; text-align: center;">
@@ -535,7 +535,7 @@
         </div>
     </div>
 
-    <script src="/socket.io/socket.io.js"></script>
+    <script src="{{ url_for('static', filename='socket.io/4.6.0/socket.io.min.js') }}"></script>
     <script src="{{ url_for('static', filename='script.js') }}"></script>
     
     <!-- 左侧图片列表宽度调整功能 -->
@@ -813,22 +813,26 @@
             }
             
             // SocketIO连接
-            const socket = io();
-            
-            // 监听AI标注进度更新
-            socket.on('ai_label_progress', function(data) {
-                // 更新进度显示
-                document.getElementById('progressExecuted').textContent = data.processed || 0;
-                document.getElementById('progressTotal').textContent = data.total || 0;
-                document.getElementById('progressTime').textContent = `${data.elapsed_time || 0}秒`;
-                document.getElementById('progressStatus').textContent = data.message || '准备中';
+            if (typeof io !== 'undefined') {
+                const socket = io();
                 
-                // 更新进度条
-                if (data.total > 0 && data.processed > 0) {
-                    const progressPercentage = Math.round((data.processed / data.total) * 100);
-                    document.getElementById('progressBar').style.width = `${progressPercentage}%`;
-                }
-            });
+                socket.on('connect_error', function(err) {
+                    console.warn('SocketIO连接失败:', err.message);
+                });
+                
+                // 监听AI标注进度更新
+                socket.on('ai_label_progress', function(data) {
+                    document.getElementById('progressExecuted').textContent = data.processed || 0;
+                    document.getElementById('progressTotal').textContent = data.total || 0;
+                    document.getElementById('progressTime').textContent = `${data.elapsed_time || 0}秒`;
+                    document.getElementById('progressStatus').textContent = data.message || '准备中';
+                    
+                    if (data.total > 0 && data.processed > 0) {
+                        const progressPercentage = Math.round((data.processed / data.total) * 100);
+                        document.getElementById('progressBar').style.width = `${progressPercentage}%`;
+                    }
+                });
+            }
             
             // 显示提示信息
             function showToast(message, type = 'info') {

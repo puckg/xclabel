@@ -7,6 +7,16 @@
 ### 软件介绍
 xclabel是一款开源图像标注与模型训练工具，采用Python+Flask开发，跨平台支持Windows/Linux/Mac。
 
+### 软件截图
+<img width="720" alt="1" src="https://raw.giteeusercontent.com/Vanishi/images/raw/master/xclabel/v3.0/1.png">
+<img width="720" alt="2" src="https://raw.giteeusercontent.com/Vanishi/images/raw/master/xclabel/v3.0/2.png">
+<img width="720" alt="3" src="https://raw.giteeusercontent.com/Vanishi/images/raw/master/xclabel/v3.0/3.png">
+<img width="720" alt="4" src="https://raw.giteeusercontent.com/Vanishi/images/raw/master/xclabel/v3.0/4.png">
+<img width="720" alt="5" src="https://raw.giteeusercontent.com/Vanishi/images/raw/master/xclabel/v3.0/5.png">
+<img width="720" alt="6" src="https://raw.giteeusercontent.com/Vanishi/images/raw/master/xclabel/v3.0/6.png">
+
+
+
 **核心功能：**
 - 多种标注类型（矩形、多边形等），支持图片、视频、LabelMe数据集导入
 - AI自动标注，支持大模型（LMStudio、vLLM、ollama、阿里云）对图片和视频自动标注

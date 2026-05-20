@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿
+
 let currentImage = null;
 let currentAnnotations = [];
 let classes = [];
@@ -2327,31 +2327,46 @@ function setupDatasetUploadEvents() {
                 method: 'POST',
                 body: formData
             })
-            .then(response => response.json())
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(data => {
+                        throw new Error(data.error || '服务器错误');
+                    }).catch(err => {
+                        if (err.message && err.message !== '服务器错误') throw err;
+                        throw new Error('上传失败，HTTP状态码: ' + response.status);
+                    });
+                }
+                return response.json();
+            })
             .then(data => {
-                // 重置按钮状态
                 uploadLabelMeBtn.innerHTML = '<i class="fas fa-upload"></i> 上传labelme数据集';
                 uploadLabelMeBtn.disabled = false;
                 
-                // 显示成功提示
-                showToast(`成功上传 ${files.length} 个LabelMe文件`);
+                if (data.error) {
+                    showToast('上传失败: ' + data.error);
+                    return;
+                }
                 
-                // 关闭模态框
+                const fileCount = data.files ? data.files.length : 0;
+                const annCount = data.annotations_processed || 0;
+                if (fileCount === 0) {
+                    showToast('未找到有效的图片文件，请确保数据集包含图片文件');
+                } else {
+                    showToast(`成功上传 ${fileCount} 个文件，处理 ${annCount} 个标注`);
+                }
+                
                 document.getElementById('datasetModal').style.display = 'none';
                 
-                // 重新加载图片列表和类别列表
                 loadImages();
                 loadClasses();
             })
             .catch(error => {
                 console.error('上传失败:', error);
                 
-                // 重置按钮状态
                 uploadLabelMeBtn.innerHTML = '<i class="fas fa-upload"></i> 上传labelme数据集';
                 uploadLabelMeBtn.disabled = false;
                 
-                // 显示错误提示
-                showToast('上传失败，请重试');
+                showToast('上传失败: ' + (error.message || '请重试'));
             });
         });
     }
