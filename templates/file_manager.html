@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>文件管理 - xclabel</title>
+    <link rel="icon" href="/static/images/logo.ico">
+    <title>文件管理-xclabel</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='all.min.css') }}">
     <style>
@@ -743,6 +744,15 @@
         
         // 页面加载完成后初始化
         document.addEventListener('DOMContentLoaded', function() {
+            // 检测是否在iframe中，如果是则隐藏顶部导航栏
+            if (window.self !== window.top) {
+                // 在iframe中，隐藏导航栏
+                const navbar = document.querySelector('.navbar');
+                if (navbar) {
+                    navbar.style.display = 'none';
+                }
+            }
+            
             // 加载初始路径的文件
             loadFiles(currentPath);
         });

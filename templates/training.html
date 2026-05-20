@@ -1,0 +1,1663 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="/static/images/logo.ico">
+    <title>训练面板-xclabel</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='all.min.css') }}">
+    <script src="/static/socket.io/4.6.0/socket.io.min.js"></script>
+    <style>
+        /* 训练页面样式 */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background-color: #f5f7fa;
+            color: #2d3748;
+            line-height: 1.5;
+        }
+
+        .training-container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            background-color: #f5f7fa;
+        }
+
+        /* 导航栏 */
+        .navbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: white;
+            padding: 0 24px;
+            height: 56px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+        }
+
+        .logo h1 {
+            font-size: 18px;
+            font-weight: 600;
+            color: #1a202c;
+        }
+
+        .logo .version {
+            font-size: 11px;
+            color: #718096;
+            margin-left: 6px;
+            font-weight: 400;
+        }
+
+        .nav-btn {
+            padding: 7px 16px;
+            background: #4a5568;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            transition: all 0.2s;
+        }
+
+        .nav-btn:hover {
+            background: #2d3748;
+        }
+
+        /* 主内容区 - 三栏布局，铺满宽度 */
+        .main-content {
+            display: grid;
+            grid-template-columns: 360px 1fr 380px;
+            gap: 16px;
+            padding: 16px;
+            flex: 1;
+            overflow: hidden;
+            width: 100%;
+            max-width: 100%;
+        }
+
+        /* 面板通用样式 */
+        .panel {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .panel-header {
+            padding: 16px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        .panel-header h3 {
+            font-size: 15px;
+            font-weight: 600;
+            color: #2d3748;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .panel-header h3 i {
+            color: #4299e1;
+        }
+
+        .panel-body {
+            padding: 16px;
+            overflow-y: auto;
+            flex: 1;
+        }
+
+        /* 表单样式 */
+        .form-group {
+            margin-bottom: 16px;
+        }
+
+        .form-group label {
+            display: block;
+            font-size: 13px;
+            font-weight: 500;
+            color: #4a5568;
+            margin-bottom: 6px;
+        }
+
+        .form-group input[type="text"],
+        .form-group input[type="number"],
+        .form-group select {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            font-size: 13px;
+            background: #f7fafc;
+            transition: all 0.2s;
+        }
+
+        .form-group input:focus,
+        .form-group select:focus {
+            outline: none;
+            border-color: #4299e1;
+            background: white;
+            box-shadow: 0 0 0 3px rgba(66,153,225,0.1);
+        }
+
+        .form-group small {
+            display: block;
+            margin-top: 4px;
+            color: #718096;
+            font-size: 11px;
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+
+        /* 按钮组 */
+        .btn-group {
+            display: flex;
+            gap: 8px;
+            margin-top: 20px;
+        }
+
+        .btn {
+            flex: 1;
+            padding: 10px 16px;
+            border: none;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+        }
+
+        .btn-primary {
+            background: #4299e1;
+            color: white;
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            background: #3182ce;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(66,153,225,0.2);
+        }
+
+        .btn-danger {
+            background: #f56565;
+            color: white;
+        }
+
+        .btn-danger:hover:not(:disabled) {
+            background: #e53e3e;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(245,101,101,0.2);
+        }
+
+        .btn-secondary {
+            background: #718096;
+            color: white;
+        }
+
+        .btn-secondary:hover:not(:disabled) {
+            background: #4a5568;
+        }
+
+        .btn-success {
+            background: #48bb78;
+            color: white;
+        }
+
+        .btn-success:hover:not(:disabled) {
+            background: #38a169;
+        }
+
+        .btn-warning {
+            background: #ed8936;
+            color: white;
+        }
+
+        .btn-warning:hover:not(:disabled) {
+            background: #dd6b20;
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* 数据集上传区域 */
+        .upload-zone {
+            border: 2px dashed #cbd5e0;
+            border-radius: 6px;
+            padding: 24px;
+            text-align: center;
+            background: #f7fafc;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-bottom: 12px;
+        }
+
+        .upload-zone:hover {
+            border-color: #4299e1;
+            background: #ebf8ff;
+        }
+
+        .upload-zone.drag-over {
+            border-color: #4299e1;
+            background: #ebf8ff;
+        }
+
+        .upload-zone i {
+            font-size: 36px;
+            color: #a0aec0;
+            margin-bottom: 8px;
+        }
+
+        .upload-text {
+            font-size: 14px;
+            font-weight: 500;
+            color: #4a5568;
+            margin-bottom: 4px;
+        }
+
+        .upload-hint {
+            font-size: 11px;
+            color: #a0aec0;
+        }
+
+        /* 已上传数据集信息 */
+        .uploaded-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px;
+            background: #c6f6d5;
+            border: 1px solid #9ae6b4;
+            border-radius: 6px;
+            margin-top: 12px;
+        }
+
+        .uploaded-info .dataset-name {
+            font-size: 13px;
+            font-weight: 500;
+            color: #22543d;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .btn-remove {
+            background: none;
+            border: none;
+            color: #e53e3e;
+            cursor: pointer;
+            padding: 4px 8px;
+            border-radius: 4px;
+            transition: all 0.2s;
+        }
+
+        .btn-remove:hover {
+            background: #fed7d7;
+        }
+
+        /* 模型选择网格 */
+        .model-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+            margin: 12px 0;
+        }
+
+        .model-item {
+            padding: 12px;
+            background: #f7fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-align: center;
+        }
+
+        .model-item:hover {
+            border-color: #4299e1;
+            background: #ebf8ff;
+        }
+
+        .model-item.active {
+            border-color: #4299e1;
+            background: #ebf8ff;
+        }
+
+        .model-item .model-name {
+            font-size: 13px;
+            font-weight: 500;
+            color: #2d3748;
+        }
+
+        .model-item .model-size {
+            font-size: 11px;
+            color: #718096;
+            margin-top: 2px;
+        }
+
+        /* YOLO11安装状态 */
+        .yolo-status {
+            padding: 12px;
+            background: #f7fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            margin-bottom: 16px;
+        }
+
+        .yolo-status.installed {
+            background: #c6f6d5;
+            border-color: #9ae6b4;
+        }
+
+        .yolo-status.not-installed {
+            background: #fed7d7;
+            border-color: #fc8181;
+        }
+
+        .status-text {
+            font-size: 13px;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .status-text i {
+            font-size: 14px;
+        }
+
+        /* 进度面板 */
+        .progress-overview {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+
+        .progress-card {
+            background: #f7fafc;
+            padding: 4px 8px;
+            border-radius: 4px;
+            border: 1px solid #e2e8f0;
+            flex: 1;
+            text-align: center;
+        }
+
+        .progress-card .label {
+            font-size: 10px;
+            color: #718096;
+        }
+
+        .progress-card .value {
+            font-size: 14px;
+            font-weight: 600;
+            color: #2d3748;
+        }
+
+        .progress-bar-container {
+            margin: 6px 0;
+        }
+
+        .progress-bar {
+            height: 6px;
+            background: #e2e8f0;
+            border-radius: 3px;
+            overflow: hidden;
+            margin-top: 4px;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #4299e1 0%, #667eea 100%);
+            transition: width 0.3s;
+            border-radius: 4px;
+        }
+
+        /* 训练状态 */
+        .training-status {
+            padding: 6px 10px;
+            background: #f7fafc;
+            border-radius: 4px;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            border: 1px solid #e2e8f0;
+        }
+
+        .status-indicator {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #a0aec0;
+        }
+
+        .status-indicator.idle {
+            background: #a0aec0;
+        }
+
+        .status-indicator.running {
+            background: #48bb78;
+            animation: pulse 1.5s infinite;
+        }
+
+        .status-indicator.paused {
+            background: #ed8936;
+        }
+
+        .status-indicator.completed {
+            background: #4299e1;
+        }
+
+        .status-indicator.error {
+            background: #f56565;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        /* 日志面板 */
+        .log-panel {
+            background: #1a202c;
+            color: #e2e8f0;
+            padding: 10px;
+            border-radius: 6px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            line-height: 1.5;
+            height: 440px;
+            overflow-y: auto;
+            margin-top: 6px;
+        }
+
+        .log-line {
+            margin-bottom: 3px;
+        }
+
+        .log-line.info {
+            color: #63b3ed;
+        }
+
+        .log-line.success {
+            color: #68d391;
+        }
+
+        .log-line.error {
+            color: #fc8181;
+        }
+
+        .log-line.warning {
+            color: #f6ad55;
+        }
+
+        /* 训练结果 */
+        .results-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+            margin-top: 16px;
+        }
+
+        .result-card {
+            background: #f7fafc;
+            padding: 16px;
+            border-radius: 6px;
+            border: 1px solid #e2e8f0;
+        }
+
+        .result-card .metric-name {
+            font-size: 11px;
+            color: #718096;
+            margin-bottom: 4px;
+        }
+
+        .result-card .metric-value {
+            font-size: 24px;
+            font-weight: 600;
+            color: #4299e1;
+        }
+
+        /* 数据集列表 */
+        .dataset-list {
+            background: #f7fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            padding: 10px;
+            min-height: 60px;
+            max-height: 180px;
+            overflow-y: auto;
+        }
+
+        .dataset-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 10px;
+            margin-bottom: 6px;
+            background: white;
+            border: 1px solid #e2e8f0;
+            border-radius: 4px;
+            transition: all 0.2s;
+            cursor: pointer;
+            min-width: 0;
+        }
+
+        .dataset-item:last-child {
+            margin-bottom: 0;
+        }
+
+        .dataset-item:hover {
+            border-color: #4299e1;
+            background: #ebf8ff;
+        }
+
+        .dataset-item.selected {
+            border-color: #4299e1;
+            background: #ebf8ff;
+            box-shadow: 0 0 0 2px rgba(66,153,225,0.1);
+        }
+
+        .dataset-info {
+            flex: 1;
+            min-width: 0;
+            overflow: hidden;
+        }
+
+        .dataset-name {
+            font-size: 12px;
+            font-weight: 500;
+            color: #2d3748;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .dataset-name i {
+            color: #4299e1;
+            font-size: 12px;
+            flex-shrink: 0;
+        }
+
+        .dataset-path {
+            font-size: 10px;
+            color: #a0aec0;
+            margin-top: 2px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .dataset-actions {
+            display: flex;
+            gap: 4px;
+            flex-shrink: 0;
+            margin-left: 8px;
+        }
+
+        .btn-delete {
+            background: #fed7d7;
+            color: #e53e3e;
+            border: 1px solid #fc8181;
+            padding: 4px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 11px;
+            transition: all 0.2s;
+            white-space: nowrap;
+        }
+
+        .btn-delete:hover {
+            background: #f56565;
+            color: white;
+        }
+
+        /* 模型列表 */
+        .model-list {
+            background: #f7fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            padding: 12px;
+            min-height: 100px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        .lightbox-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.85);
+            z-index: 9999;
+            cursor: zoom-out;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .lightbox-overlay.active {
+            display: flex;
+        }
+
+        .lightbox-overlay img {
+            max-width: 92%;
+            max-height: 92%;
+            border-radius: 6px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+            cursor: default;
+        }
+
+        .lightbox-close {
+            position: absolute;
+            top: 16px;
+            right: 24px;
+            color: white;
+            font-size: 28px;
+            cursor: pointer;
+            opacity: 0.7;
+            transition: opacity 0.2s;
+        }
+
+        .lightbox-close:hover {
+            opacity: 1;
+        }
+
+        .zoomable {
+            cursor: zoom-in;
+            transition: transform 0.15s;
+        }
+
+        .zoomable:hover {
+            transform: scale(1.02);
+        }
+    </style>
+</head>
+<body>
+    <div class="lightbox-overlay" id="lightbox" onclick="closeLightbox()">
+        <span class="lightbox-close"><i class="fas fa-times"></i></span>
+        <img id="lightboxImg" onclick="event.stopPropagation()">
+    </div>
+    <div class="training-container">
+        <!-- 顶部导航栏 -->
+        <header class="navbar">
+            <div class="logo">
+                <h1>xclabel <span class="version">{{ version }}</span></h1>
+            </div>
+            <div class="nav-buttons">
+                <button class="nav-btn" onclick="window.location.href='/';">
+                    <i class="fas fa-home"></i> 返回主页
+                </button>
+            </div>
+        </header>
+
+        <!-- 主内容区 - 三栏布局 -->
+        <div class="main-content">
+            <!-- 左侧：训练配置 -->
+            <div class="panel">
+                <div class="panel-header">
+                    <h3><i class="fas fa-cog"></i> 训练配置</h3>
+                </div>
+                <div class="panel-body">
+                    <!-- 训练环境状态 -->
+                    <div class="form-group">
+                        <label><i class="fas fa-check-circle"></i> 训练环境状态</label>
+                        <div id="envStatus" class="yolo-status not-installed">
+                            <div class="status-text">
+                                <i class="fas fa-times-circle" style="color: #f56565;"></i>
+                                <span>检测中...</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 数据集上传 -->
+                    <div class="form-group">
+                        <label><i class="fas fa-database"></i> 数据集管理</label>
+                        
+                        <!-- 已上传的数据集列表 -->
+                        <div id="datasetList" class="dataset-list">
+                            <p style="text-align: center; color: #868e96; padding: 20px;">暂无数据集</p>
+                        </div>
+                        
+                        <!-- 上传区域 -->
+                        <div class="upload-zone" id="datasetUploadZone" style="margin-top: 12px;">
+                            <i class="fas fa-cloud-upload-alt"></i>
+                            <div class="upload-text">点击或拖拽上传新数据集</div>
+                            <div class="upload-hint">支持从标注页面导出的YOLO格式ZIP文件</div>
+                            <input type="file" id="datasetFileInput" accept=".zip" style="display: none;">
+                        </div>
+                        
+                        <small>上传的数据集会保留，删除后才消失</small>
+                    </div>
+
+                    <!-- 选择预训练模型 -->
+                    <div class="form-group">
+                        <label for="modelSelect"><i class="fas fa-cube"></i> 选择预训练模型</label>
+                        <div style="display: flex; gap: 8px;">
+                            <select id="modelSelect" style="flex: 1;">
+                                <option value="">请先刷新模型列表</option>
+                            </select>
+                            <button type="button" class="btn btn-secondary" onclick="refreshModels()" style="flex: none; width: 36px; min-width: 36px; height: 38px; padding: 0; font-size: 14px; line-height: 1;">
+                                <i class="fas fa-sync-alt"></i>
+                            </button>
+                        </div>
+                        <small>将.pt文件放到 <code>pre_models</code> 目录</small>
+                    </div>
+
+                    <!-- 训练设备选择 -->
+                    <div class="form-group">
+                        <label for="deviceSelect"><i class="fas fa-microchip"></i> 训练设备</label>
+                        <select id="deviceSelect">
+                            <option value="CPU">CPU</option>
+                        </select>
+                    </div>
+
+                    <!-- 训练参数 -->
+                    <div class="form-group">
+                        <label><i class="fas fa-sliders-h"></i> 训练参数</label>
+                        
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="epochs">训练轮数 (Epochs)</label>
+                                <input type="number" id="epochs" value="100" min="1" max="1000">
+                            </div>
+                            <div class="form-group">
+                                <label for="batchSize">批次大小 (Batch)</label>
+                                <input type="number" id="batchSize" value="16" min="1" max="128">
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="imageSize">输入分辨率</label>
+                                <input type="number" id="imageSize" value="640" min="320" max="1280" step="32">
+                                <small>常见: 320, 416, 512, 640</small>
+                            </div>
+                            <div class="form-group">
+                                <label for="learningRate">学习率</label>
+                                <input type="text" id="learningRate" value="0.01">
+                                <small>推荐: 0.001-0.1</small>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="optimizer">优化器</label>
+                            <select id="optimizer">
+                                <option value="SGD" selected>SGD</option>
+                                <option value="Adam">Adam</option>
+                                <option value="AdamW">AdamW</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" id="autoResume" checked> 
+                                启用自动恢复训练
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- 训练控制按钮 -->
+                    <div class="btn-group">
+                        <button class="btn btn-success" id="startTrainingBtn" onclick="startTraining()">
+                            <i class="fas fa-play"></i> 开始训练
+                        </button>
+                        <button class="btn btn-danger" id="stopTrainingBtn" onclick="stopTraining()" disabled>
+                            <i class="fas fa-stop"></i> 停止
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 中间：训练进度与日志 -->
+            <div class="panel">
+                <div class="panel-header">
+                    <h3><i class="fas fa-chart-line"></i> 训练进度</h3>
+                </div>
+                <div class="panel-body">
+                    <!-- 训练状态 -->
+                    <div class="training-status">
+                        <div class="status-indicator idle" id="statusIndicator"></div>
+                        <div style="font-size: 13px; font-weight: 500;" id="statusText">等待开始</div>
+                    </div>
+
+                    <!-- 进度总览 -->
+                    <div class="progress-overview">
+                        <div class="progress-card">
+                            <div class="label">当前轮数</div>
+                            <div class="value" id="currentEpoch">0 / 0</div>
+                        </div>
+                        <div class="progress-card">
+                            <div class="label">训练进度</div>
+                            <div class="value" id="progressPercent">0%</div>
+                        </div>
+                        <div class="progress-card">
+                            <div class="label">mAP@0.5</div>
+                            <div class="value" id="map50">-</div>
+                        </div>
+                        <div class="progress-card">
+                            <div class="label">已用时间</div>
+                            <div class="value" id="elapsedTime">00:00:00</div>
+                        </div>
+                    </div>
+
+                    <!-- 进度条 -->
+                    <div class="progress-bar-container">
+                        <div style="display: flex; justify-content: space-between; font-size: 12px; color: #718096;">
+                            <span>总体进度</span>
+                            <span id="progressDetail">0%</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="progressBar" style="width: 0%;"></div>
+                        </div>
+                    </div>
+
+                    <!-- 训练日志 -->
+                    <h4 style="margin-top: 10px; margin-bottom: 6px; font-size: 13px; color: #4a5568; font-weight: 500;">
+                        <i class="fas fa-terminal"></i> 训练日志
+                    </h4>
+                    <div class="log-panel" id="logPanel">
+                        <div class="log-line info">等待训练开始...</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 右侧：训练结果与测试 -->
+            <div class="panel">
+                <div class="panel-header">
+                    <h3><i class="fas fa-trophy"></i> 训练结果</h3>
+                </div>
+                <div class="panel-body">
+                    <!-- 选择训练模型 -->
+                    <div class="form-group">
+                        <label for="trainedModelSelect"><i class="fas fa-brain"></i> 选择训练模型</label>
+                        <div style="display: flex; gap: 8px;">
+                            <select id="trainedModelSelect" onchange="onTrainedModelChange()" style="flex: 1;">
+                                <option value="">暂无已训练模型</option>
+                            </select>
+                            <button type="button" class="btn btn-secondary" onclick="loadAvailableModels()" style="flex: none; width: 36px; min-width: 36px; height: 38px; padding: 0; font-size: 14px; line-height: 1;">
+                                <i class="fas fa-sync-alt"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- 模型信息 -->
+                    <div id="modelInfoPanel" style="display: none;">
+                        <div class="results-grid">
+                            <div class="result-card">
+                                <div class="metric-name">mAP@0.5</div>
+                                <div class="metric-value" id="finalMap50">-</div>
+                            </div>
+                            <div class="result-card">
+                                <div class="metric-name">mAP@0.5:0.95</div>
+                                <div class="metric-value" id="finalMap">-</div>
+                            </div>
+                            <div class="result-card">
+                                <div class="metric-name">Precision</div>
+                                <div class="metric-value" id="finalPrecision">-</div>
+                            </div>
+                            <div class="result-card">
+                                <div class="metric-name">Recall</div>
+                                <div class="metric-value" id="finalRecall">-</div>
+                            </div>
+                        </div>
+
+                        <!-- 训练参数 -->
+                        <div id="modelArgsSection" style="margin-top: 12px; font-size: 12px; color: #718096; background: #f7fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px;">
+                        </div>
+
+                        <div class="btn-group" style="margin-top: 14px;">
+                            <button class="btn btn-primary" onclick="downloadModel()" id="downloadModelBtn">
+                                <i class="fas fa-download"></i> 下载模型
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- 测试最佳模型 -->
+                    <h4 style="font-size: 14px; color: #4a5568; margin-bottom: 14px; font-weight: 500; margin-top: 20px;">
+                        <i class="fas fa-vial"></i> 测试模型
+                    </h4>
+                    <div id="testModelSection">
+                        <div class="upload-zone" id="testImageZone" style="padding: 16px;">
+                            <i class="fas fa-image" style="font-size: 28px;"></i>
+                            <div class="upload-text" style="font-size: 13px;">点击或拖拽上传测试图片</div>
+                            <div class="upload-hint">支持 jpg / png / bmp 格式</div>
+                            <input type="file" id="testImageInput" accept="image/*" style="display: none;">
+                        </div>
+                        <div id="testImagePreview" style="margin-top: 12px; display: none;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                <span id="testImageName" style="font-size: 12px; color: #4a5568;"></span>
+                                <button type="button" onclick="clearTestImage()" style="background: none; border: none; color: #e53e3e; cursor: pointer; font-size: 12px;">
+                                    <i class="fas fa-times"></i> 移除
+                                </button>
+                            </div>
+                            <img id="testImageThumb" class="zoomable" onclick="openLightbox(this.src)" style="max-width: 100%; max-height: 120px; border-radius: 4px; border: 1px solid #e2e8f0;">
+                        </div>
+                        <button class="btn btn-primary" id="runTestBtn" onclick="runModelTest()" disabled style="width: 100%; margin-top: 12px;">
+                            <i class="fas fa-play"></i> 执行测试
+                        </button>
+
+                        <!-- 测试结果 -->
+                        <div id="testResultSection" style="display: none; margin-top: 16px;">
+                            <h4 style="font-size: 13px; color: #4a5568; margin-bottom: 10px; font-weight: 500;">
+                                <i class="fas fa-search"></i> 检测结果
+                                <span id="testResultCount" style="color: #4299e1; margin-left: 6px;"></span>
+                            </h4>
+                            <div style="background: #f7fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px; text-align: center;">
+                                <img id="testResultImage" class="zoomable" onclick="openLightbox(this.src)" style="max-width: 100%; border-radius: 4px;">
+                            </div>
+                            <div id="testDetectionsList" style="margin-top: 10px; max-height: 200px; overflow-y: auto;">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 全局变量
+        let socket = null;
+        let trainingId = null;
+        let startTime = null;
+        let selectedDataset = null;
+        let selectedModel = '';
+        let uploadedDatasetPath = null;
+        let uploadedDatasets = [];
+        let testImageFile = null;
+        let selectedTrainedModel = '';
+        let initialCheckDone = false;
+        let elapsedTimer = null;
+
+        // 初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            initSocketIO();
+            setupDatasetUpload();
+            setupTestImageUpload();
+            loadUploadedDatasets();
+            loadEnvStatus();
+            refreshModels();
+            loadAvailableModels();
+            checkActiveTraining();
+        });
+
+        // 初始化SocketIO
+        function initSocketIO() {
+            socket = io();
+            
+            socket.on('connect', function() {
+                console.log('已连接到服务器');
+                if (initialCheckDone) {
+                    checkActiveTraining();
+                }
+            });
+
+            // 监听训练进度更新
+            socket.on('training_progress', function(data) {
+                updateTrainingProgress(data);
+            });
+
+            // 监听训练日志
+            socket.on('training_log', function(data) {
+                addLogLine(data.message, data.level || 'info');
+            });
+
+            // 监听训练完成
+            socket.on('training_complete', function(data) {
+                onTrainingComplete(data);
+            });
+
+            // 监听训练错误
+            socket.on('training_error', function(data) {
+                onTrainingError(data);
+            });
+        }
+
+        function checkActiveTraining() {
+            fetch('/api/training/active')
+            .then(res => res.json())
+            .then(data => {
+                initialCheckDone = true;
+                if (data.success && data.task) {
+                    const task = data.task;
+                    trainingId = task.task_id;
+                    if (task.start_time) {
+                        startTime = new Date(task.start_time);
+                    }
+                    updateTrainingStatus(task.status, task.status === 'running' ? '训练进行中...' : task.status === 'completed' ? '训练完成' : task.status === 'error' ? '训练出错' : '训练已暂停');
+                    document.getElementById('startTrainingBtn').disabled = (task.status === 'running');
+                    document.getElementById('stopTrainingBtn').disabled = (task.status !== 'running');
+                    updateTrainingProgress({
+                        progress: task.progress,
+                        current_epoch: task.current_epoch,
+                        total_epochs: task.total_epochs,
+                        metrics: task.metrics
+                    });
+                    if (task.status === 'running') {
+                        addLogLine('检测到正在进行的训练任务，已恢复状态', 'info');
+                        if (elapsedTimer) clearInterval(elapsedTimer);
+                        elapsedTimer = setInterval(function() {
+                            if (startTime) {
+                                const elapsed = Math.floor((new Date() - startTime) / 1000);
+                                document.getElementById('elapsedTime').textContent = formatTime(elapsed);
+                            }
+                        }, 1000);
+                    }
+                    if (task.status === 'completed') {
+                        loadAvailableModels(task.task_id);
+                    }
+                }
+            })
+            .catch(err => {
+                console.error('检查活跃训练任务失败:', err);
+            });
+        }
+
+        // 加载训练环境状态
+        function loadEnvStatus() {
+            fetch('/api/training/env-status')
+            .then(res => res.json())
+            .then(data => {
+                const statusDiv = document.getElementById('envStatus');
+                const deviceSelect = document.getElementById('deviceSelect');
+                
+                if (data.installed) {
+                    statusDiv.className = 'yolo-status installed';
+                    const cudaInfo = data.cuda_available ? '<span style="color: #48bb78;">支持CUDA</span>' : '<span style="color: #a0aec0;">不支持CUDA</span>';
+                    statusDiv.innerHTML = `
+                        <div class="status-text">
+                            <i class="fas fa-check-circle" style="color: #48bb78;"></i>
+                            <span>已就绪 (ultralytics v${data.version || 'unknown'} | torch v${data.torch_version || 'unknown'} | ${cudaInfo})</span>
+                        </div>
+                    `;
+                } else {
+                    statusDiv.className = 'yolo-status not-installed';
+                    statusDiv.innerHTML = `
+                        <div class="status-text">
+                            <i class="fas fa-times-circle" style="color: #f56565;"></i>
+                            <span>未安装ultralytics，请先安装训练环境</span>
+                        </div>
+                    `;
+                }
+                
+                deviceSelect.innerHTML = data.devices.map(d => 
+                    `<option value="${d}">${d}</option>`
+                ).join('');
+            })
+            .catch(err => {
+                console.error('加载训练环境状态失败:', err);
+            });
+        }
+
+        // 刷新模型列表
+        function refreshModels() {
+            fetch('/api/yolo11/models')
+            .then(response => response.json())
+            .then(data => {
+                const modelSelect = document.getElementById('modelSelect');
+                
+                const models = data.models || [];
+                
+                if (models.length === 0) {
+                    modelSelect.innerHTML = '<option value="">暂无模型</option>';
+                } else {
+                    modelSelect.innerHTML = models.map((model, index) => 
+                        `<option value="${model}" ${index === 0 ? 'selected' : ''}>${model}</option>`
+                    ).join('');
+                    
+                    selectedModel = models[0];
+                }
+            })
+            .catch(error => {
+                console.error('刷新模型列表失败:', error);
+            });
+        }
+
+        // 加载已上传的数据集列表
+        function loadUploadedDatasets() {
+            fetch('/api/training/datasets')
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    uploadedDatasets = data.datasets || [];
+                    renderDatasetList();
+                }
+            })
+            .catch(err => {
+                console.error('加载数据集列表失败:', err);
+            });
+        }
+
+        // 渲染数据集列表
+        function renderDatasetList() {
+            const datasetList = document.getElementById('datasetList');
+            
+            if (uploadedDatasets.length === 0) {
+                datasetList.innerHTML = '<p style="text-align: center; color: #868e96; padding: 20px; font-size: 12px;">暂无数据集</p>';
+                return;
+            }
+
+            datasetList.innerHTML = uploadedDatasets.map((dataset, index) => `
+                <div class="dataset-item ${dataset.path === uploadedDatasetPath ? 'selected' : ''}" onclick="selectDataset(${index})">
+                    <div class="dataset-info">
+                        <div class="dataset-name">
+                            <i class="fas fa-folder-open"></i>
+                            <span>${dataset.name}</span>
+                        </div>
+                    </div>
+                    <div class="dataset-actions">
+                        <button class="btn-delete" onclick="event.stopPropagation(); deleteDataset(${index})" title="删除">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // 选择数据集
+        function selectDataset(index) {
+            const dataset = uploadedDatasets[index];
+            uploadedDatasetPath = dataset.path;
+            renderDatasetList();
+            addLogLine(`已选择数据集: ${dataset.name}`, 'info');
+        }
+
+        // 删除数据集
+        function deleteDataset(index) {
+            const dataset = uploadedDatasets[index];
+            if (!confirm(`确定要删除数据集 "${dataset.name}" 吗？`)) return;
+
+            fetch('/api/training/remove-dataset', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({dataset_path: dataset.path})
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    uploadedDatasets.splice(index, 1);
+                    if (uploadedDatasetPath === dataset.path) {
+                        uploadedDatasetPath = null;
+                    }
+                    renderDatasetList();
+                    addLogLine(`数据集已删除: ${dataset.name}`, 'warning');
+                } else {
+                    alert('删除失败: ' + data.error);
+                }
+            })
+            .catch(err => {
+                alert('删除失败: ' + err.message);
+            });
+        }
+
+        // 设置数据集上传
+        function setupDatasetUpload() {
+            const uploadZone = document.getElementById('datasetUploadZone');
+            const fileInput = document.getElementById('datasetFileInput');
+
+            // 点击上传区域触发文件选择
+            uploadZone.addEventListener('click', function() {
+                fileInput.click();
+            });
+
+            // 文件选择事件
+            fileInput.addEventListener('change', function(e) {
+                const file = e.target.files[0];
+                if (file) {
+                    handleDatasetUpload(file);
+                }
+            });
+
+            // 拖拽上传
+            uploadZone.addEventListener('dragover', function(e) {
+                e.preventDefault();
+                uploadZone.classList.add('drag-over');
+            });
+
+            uploadZone.addEventListener('dragleave', function(e) {
+                e.preventDefault();
+                uploadZone.classList.remove('drag-over');
+            });
+
+            uploadZone.addEventListener('drop', function(e) {
+                e.preventDefault();
+                uploadZone.classList.remove('drag-over');
+                
+                const file = e.dataTransfer.files[0];
+                if (file && file.name.endsWith('.zip')) {
+                    handleDatasetUpload(file);
+                } else {
+                    alert('请上传ZIP格式的数据集文件！');
+                }
+            });
+        }
+
+        // 处理数据集上传
+        function handleDatasetUpload(file) {
+            const formData = new FormData();
+            formData.append('dataset', file);
+
+            fetch('/api/training/upload-dataset', {
+                method: 'POST',
+                body: formData
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    addLogLine(`数据集上传成功: ${file.name}`, 'success');
+                    // 重新加载数据集列表
+                    loadUploadedDatasets();
+                } else {
+                    alert('上传失败: ' + data.error);
+                }
+            })
+            .catch(err => {
+                alert('上传失败: ' + err.message);
+            });
+        }
+
+        // 开始训练
+        function startTraining() {
+            if (!uploadedDatasetPath) {
+                alert('请选择数据集！');
+                return;
+            }
+
+            if (!selectedModel) {
+                alert('请选择预训练模型！');
+                return;
+            }
+
+            const config = {
+                dataset: uploadedDatasetPath,
+                model: selectedModel,
+                epochs: parseInt(document.getElementById('epochs').value),
+                batch_size: parseInt(document.getElementById('batchSize').value),
+                image_size: parseInt(document.getElementById('imageSize').value),
+                learning_rate: parseFloat(document.getElementById('learningRate').value),
+                optimizer: document.getElementById('optimizer').value,
+                device: document.getElementById('deviceSelect').value,
+                auto_resume: document.getElementById('autoResume').checked
+            };
+
+            fetch('/api/training/start', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(config)
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    trainingId = data.training_id;
+                    startTime = new Date();
+                    updateTrainingStatus('running', '训练进行中...');
+                    document.getElementById('startTrainingBtn').disabled = true;
+                    document.getElementById('stopTrainingBtn').disabled = false;
+                    addLogLine('训练任务已启动', 'success');
+                } else {
+                    alert('启动训练失败: ' + data.error);
+                }
+            })
+            .catch(err => {
+                alert('请求失败: ' + err.message);
+            });
+        }
+
+        // 停止训练
+        function stopTraining() {
+            if (!trainingId) return;
+
+            if (!confirm('确定要停止当前训练吗？')) return;
+
+            fetch('/api/training/stop', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({training_id: trainingId})
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    updateTrainingStatus('completed', '训练已停止');
+                    document.getElementById('startTrainingBtn').disabled = false;
+                    document.getElementById('stopTrainingBtn').disabled = true;
+                    addLogLine('训练已停止', 'warning');
+                }
+            });
+        }
+
+        // 更新训练进度
+        function updateTrainingProgress(data) {
+            const progress = data.progress || 0;
+            const currentEpoch = data.current_epoch || 0;
+            const totalEpochs = data.total_epochs || 0;
+            const metrics = data.metrics || {};
+
+            // 更新进度
+            document.getElementById('progressPercent').textContent = progress.toFixed(1) + '%';
+            document.getElementById('progressDetail').textContent = progress.toFixed(1) + '%';
+            document.getElementById('progressBar').style.width = progress + '%';
+            document.getElementById('currentEpoch').textContent = currentEpoch + ' / ' + totalEpochs;
+
+            // 更新指标
+            if (metrics.map50 !== undefined) {
+                document.getElementById('map50').textContent = metrics.map50.toFixed(3);
+            }
+
+            // 更新时间
+            if (startTime) {
+                const elapsed = Math.floor((new Date() - startTime) / 1000);
+                document.getElementById('elapsedTime').textContent = formatTime(elapsed);
+            }
+        }
+
+        // 训练完成
+        function onTrainingComplete(data) {
+            if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
+            updateTrainingStatus('completed', '训练完成！');
+            document.getElementById('startTrainingBtn').disabled = false;
+            document.getElementById('stopTrainingBtn').disabled = true;
+
+            addLogLine('训练完成！', 'success');
+            loadAvailableModels(trainingId);
+        }
+
+        // 训练错误
+        function onTrainingError(data) {
+            if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
+            updateTrainingStatus('error', '训练出错');
+            document.getElementById('startTrainingBtn').disabled = false;
+            document.getElementById('stopTrainingBtn').disabled = true;
+            addLogLine('错误: ' + data.error, 'error');
+        }
+
+        // 更新训练状态
+        function updateTrainingStatus(status, text) {
+            const indicator = document.getElementById('statusIndicator');
+            const statusText = document.getElementById('statusText');
+
+            indicator.className = 'status-indicator ' + status;
+            statusText.textContent = text;
+        }
+
+        // 添加日志行
+        function addLogLine(message, level = 'info') {
+            const logPanel = document.getElementById('logPanel');
+            const line = document.createElement('div');
+            line.className = 'log-line ' + level;
+            
+            const timestamp = new Date().toLocaleTimeString('zh-CN');
+            line.textContent = `[${timestamp}] ${message}`;
+            
+            logPanel.appendChild(line);
+            logPanel.scrollTop = logPanel.scrollHeight;
+        }
+
+        // 格式化时间
+        function formatTime(seconds) {
+            const h = Math.floor(seconds / 3600);
+            const m = Math.floor((seconds % 3600) / 60);
+            const s = seconds % 60;
+            return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+        }
+
+        // 灯箱
+        function openLightbox(src) {
+            document.getElementById('lightboxImg').src = src;
+            document.getElementById('lightbox').classList.add('active');
+        }
+
+        function closeLightbox() {
+            document.getElementById('lightbox').classList.remove('active');
+        }
+
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') closeLightbox();
+        });
+
+        // 加载训练历史
+        function loadTrainingHistory() {
+        }
+
+        // 下载模型
+        function downloadModel() {
+            const taskId = document.getElementById('trainedModelSelect').value;
+            if (!taskId) return;
+            window.open('/api/training/download/' + taskId, '_blank');
+        }
+
+        // 设置测试图片上传
+        function setupTestImageUpload() {
+            const zone = document.getElementById('testImageZone');
+            const input = document.getElementById('testImageInput');
+
+            zone.addEventListener('click', function() {
+                input.click();
+            });
+
+            input.addEventListener('change', function(e) {
+                const file = e.target.files[0];
+                if (file) handleTestImage(file);
+            });
+
+            zone.addEventListener('dragover', function(e) {
+                e.preventDefault();
+                zone.classList.add('drag-over');
+            });
+
+            zone.addEventListener('dragleave', function(e) {
+                e.preventDefault();
+                zone.classList.remove('drag-over');
+            });
+
+            zone.addEventListener('drop', function(e) {
+                e.preventDefault();
+                zone.classList.remove('drag-over');
+                const file = e.dataTransfer.files[0];
+                if (file && file.type.startsWith('image/')) {
+                    handleTestImage(file);
+                }
+            });
+        }
+
+        // 处理测试图片选择
+        function handleTestImage(file) {
+            testImageFile = file;
+            const preview = document.getElementById('testImagePreview');
+            const thumb = document.getElementById('testImageThumb');
+            const name = document.getElementById('testImageName');
+
+            name.textContent = file.name;
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                thumb.src = e.target.result;
+            };
+            reader.readAsDataURL(file);
+
+            preview.style.display = 'block';
+            updateTestBtnState();
+        }
+
+        // 清除测试图片
+        function clearTestImage() {
+            testImageFile = null;
+            document.getElementById('testImagePreview').style.display = 'none';
+            document.getElementById('testImageInput').value = '';
+            document.getElementById('testResultSection').style.display = 'none';
+            updateTestBtnState();
+        }
+
+        // 更新测试按钮状态
+        function updateTestBtnState() {
+            const modelSelect = document.getElementById('trainedModelSelect');
+            const runBtn = document.getElementById('runTestBtn');
+            const hasModel = modelSelect.value !== '';
+            const hasImage = testImageFile !== null;
+            runBtn.disabled = !(hasModel && hasImage);
+        }
+
+        // 加载已训练模型列表
+        function loadAvailableModels(selectTaskId) {
+            fetch('/api/training/available-models')
+            .then(res => res.json())
+            .then(data => {
+                const select = document.getElementById('trainedModelSelect');
+                if (data.success && data.models.length > 0) {
+                    select.innerHTML = data.models.map(m =>
+                        `<option value="${m.task_id}">${m.task_id} (${m.train_time})</option>`
+                    ).join('');
+                    if (selectTaskId) {
+                        select.value = selectTaskId;
+                    }
+                    selectedTrainedModel = select.value;
+                    onTrainedModelChange();
+                } else {
+                    select.innerHTML = '<option value="">暂无已训练模型</option>';
+                    selectedTrainedModel = '';
+                    document.getElementById('modelInfoPanel').style.display = 'none';
+                }
+                updateTestBtnState();
+            })
+            .catch(err => {
+                console.error('加载已训练模型列表失败:', err);
+            });
+        }
+
+        function onTrainedModelChange() {
+            const taskId = document.getElementById('trainedModelSelect').value;
+            selectedTrainedModel = taskId;
+            updateTestBtnState();
+            if (!taskId) {
+                document.getElementById('modelInfoPanel').style.display = 'none';
+                return;
+            }
+            fetch('/api/training/model-info/' + taskId)
+            .then(res => res.json())
+            .then(data => {
+                if (data.success && data.info) {
+                    const info = data.info;
+                    const m = info.metrics || {};
+                    document.getElementById('finalMap50').textContent = m.map50 !== undefined ? m.map50.toFixed(3) : '-';
+                    document.getElementById('finalMap').textContent = m.map50_95 !== undefined ? m.map50_95.toFixed(3) : '-';
+                    document.getElementById('finalPrecision').textContent = m.precision !== undefined ? m.precision.toFixed(3) : '-';
+                    document.getElementById('finalRecall').textContent = m.recall !== undefined ? m.recall.toFixed(3) : '-';
+
+                    const argsDiv = document.getElementById('modelArgsSection');
+                    if (info.args) {
+                        const a = info.args;
+                        const sizeStr = info.has_best ? (info.best_size / 1024 / 1024).toFixed(1) + ' MB' : '-';
+                        argsDiv.innerHTML = `
+                            <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px 16px;">
+                                <span>模型: ${a.model || '-'}</span>
+                                <span>数据集: ${a.data || '-'}</span>
+                                <span>轮数: ${a.epochs || '-'}</span>
+                                <span>批次: ${a.batch || '-'}</span>
+                                <span>图像尺寸: ${a.imgsz || '-'}</span>
+                                <span>优化器: ${a.optimizer || '-'}</span>
+                                <span>学习率: ${a.lr0 || '-'}</span>
+                                <span>设备: ${a.device || '-'}</span>
+                                <span>模型大小: ${sizeStr}</span>
+                            </div>
+                        `;
+                    } else {
+                        argsDiv.innerHTML = '<span>无训练参数信息</span>';
+                    }
+
+                    document.getElementById('downloadModelBtn').disabled = !info.has_best;
+                    document.getElementById('modelInfoPanel').style.display = 'block';
+                } else {
+                    document.getElementById('modelInfoPanel').style.display = 'none';
+                }
+            })
+            .catch(err => {
+                console.error('获取模型信息失败:', err);
+                document.getElementById('modelInfoPanel').style.display = 'none';
+            });
+        }
+
+        // 执行模型测试
+        function runModelTest() {
+            const modelSelect = document.getElementById('trainedModelSelect');
+            const taskId = modelSelect.value;
+            
+            if (!taskId || !testImageFile) {
+                alert('请选择训练模型并上传测试图片');
+                return;
+            }
+
+            const runBtn = document.getElementById('runTestBtn');
+            runBtn.disabled = true;
+            runBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 检测中...';
+
+            const formData = new FormData();
+            formData.append('image', testImageFile);
+            formData.append('task_id', taskId);
+
+            fetch('/api/training/test-model', {
+                method: 'POST',
+                body: formData
+            })
+            .then(res => res.json())
+            .then(data => {
+                runBtn.disabled = false;
+                runBtn.innerHTML = '<i class="fas fa-play"></i> 执行测试';
+
+                if (data.success) {
+                    const resultSection = document.getElementById('testResultSection');
+                    resultSection.style.display = 'block';
+
+                    document.getElementById('testResultImage').src = data.image;
+                    document.getElementById('testResultCount').textContent = `共检测到 ${data.count} 个目标`;
+
+                    const listDiv = document.getElementById('testDetectionsList');
+                    if (data.detections && data.detections.length > 0) {
+                        listDiv.innerHTML = data.detections.map((d, i) => `
+                            <div style="padding: 6px 10px; background: #f7fafc; border: 1px solid #e2e8f0; border-radius: 4px; margin-bottom: 4px; font-size: 12px; display: flex; justify-content: space-between;">
+                                <span><i class="fas fa-tag" style="color: #4299e1; margin-right: 4px;"></i>${d.class}</span>
+                                <span style="color: #718096;">${(d.confidence * 100).toFixed(1)}%</span>
+                            </div>
+                        `).join('');
+                    } else {
+                        listDiv.innerHTML = '<div style="text-align: center; color: #a0aec0; padding: 12px; font-size: 12px;">未检测到目标</div>';
+                    }
+
+                    addLogLine(`模型测试完成，检测到 ${data.count} 个目标`, 'success');
+                } else {
+                    alert('测试失败: ' + data.error);
+                    addLogLine('模型测试失败: ' + data.error, 'error');
+                }
+            })
+            .catch(err => {
+                runBtn.disabled = false;
+                runBtn.innerHTML = '<i class="fas fa-play"></i> 执行测试';
+                alert('请求失败: ' + err.message);
+            });
+        }
+    </script>
+</body>
+</html>

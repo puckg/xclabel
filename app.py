@@ -1,4 +1,4 @@
-import os
+﻿import os
 import json
 import math
 import numpy as np
@@ -12,18 +12,18 @@ import logging
 import uuid
 import time
 from urllib.parse import urlparse
-from flask import Flask, render_template, request, jsonify, send_from_directory
+from flask import Flask, render_template, request, jsonify, send_from_directory, send_file
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit
 from PIL import Image
-from AiUtils import AIAutoLabeler
-
+from AiUtils import AiUtils
+import argparse
 
 app = Flask(__name__)
 CORS(app)
 
 # 应用版本号
-APP_VERSION = "v2.7"
+APP_VERSION = "v3.0"
 
 # 配置SocketIO
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
@@ -100,10 +100,10 @@ class VideoAnnotationTask:
             timeout = int(self.api_config.get('timeout', 30))
             prompt = self.api_config.get('prompt', '检测图中物体，返回JSON：{"detections":[{"label":"类别","confidence":0.9,"bbox":[x1,y1,x2,y2]}]}')
             model = self.api_config.get('model', 'qwen/qwen3-vl-8b')
-            inference_tool = self.api_config.get('inferenceTool', 'LMStudio')
+            inference_tool = self.api_config.get('inferenceTool', 'OpenAI')
             
             # 初始化AIAutoLabeler
-            labeler = AIAutoLabeler(api_url, api_key, prompt, timeout, inference_tool, model)
+            labeler = AiUtils(api_url, api_key, prompt, timeout, inference_tool, model)
             
             # 打开视频流
             cap = cv2.VideoCapture(self.video_path)
@@ -273,20 +273,18 @@ class VideoAnnotationTask:
             'output_dir': self.output_dir
         }
 
-# 配置
-import os
+
 
 # 使用当前工作目录作为基础目录
 BASE_PATH = os.getcwd()
-UPLOAD_FOLDER = os.path.join(BASE_PATH, 'uploads')
+UPLOAD_FOLDER = os.path.join(BASE_PATH, 'uploads', 'samples')
 STATIC_FOLDER = os.path.join(BASE_PATH, 'static')
-ANNOTATIONS_FOLDER = os.path.join(UPLOAD_FOLDER, 'annotations')
+ANNOTATIONS_FOLDER = os.path.join(BASE_PATH, 'uploads', 'annotations')
 
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['STATIC_FOLDER'] = STATIC_FOLDER
 app.config['ANNOTATIONS_FOLDER'] = ANNOTATIONS_FOLDER
 
-# 创建必要的目录
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(STATIC_FOLDER, exist_ok=True)
 os.makedirs(ANNOTATIONS_FOLDER, exist_ok=True)
@@ -317,6 +315,11 @@ def index():
 @app.route('/ai-config')
 def ai_config():
     return render_template('ai_config.html', version=APP_VERSION)
+
+@app.route('/training')
+def training():
+    """训练环境页面"""
+    return render_template('training.html', version=APP_VERSION)
 
 @app.route('/file-manager')
 def file_manager():
@@ -863,37 +866,23 @@ def get_image(filename):
 @app.route('/uploads/<path:filename>')
 def serve_uploads(filename):
     """提供uploads目录下的文件访问，支持子目录"""
-    import os
+    uploads_root = os.path.join(BASE_PATH, 'uploads')
     
-    # 打印请求的文件名和UPLOAD_FOLDER配置，用于调试
-    print(f"请求的文件路径: {filename}")
-    print(f"UPLOAD_FOLDER配置: {app.config['UPLOAD_FOLDER']}")
+    full_path = os.path.join(uploads_root, filename)
     
-    # 构建完整的文件路径
-    full_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-    print(f"完整的文件路径: {full_path}")
-    
-    # 检查文件是否存在
     if not os.path.exists(full_path):
-        print(f"文件不存在: {full_path}")
         return jsonify({
             'success': False,
-            'error': 'File not found',
-            'requested_path': filename,
-            'full_path': full_path,
-            'upload_folder': app.config['UPLOAD_FOLDER']
+            'error': 'File not found'
         }), 404
     
-    # 安全检查，防止路径遍历攻击
     if '..' in filename or filename.startswith('/'):
-        print(f"不安全的文件路径: {filename}")
         return jsonify({
             'success': False,
             'error': 'Invalid file path'
         }), 400
     
-    print(f"成功找到文件: {full_path}")
-    return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
+    return send_from_directory(uploads_root, filename)
 
 
 @app.route('/api/upload', methods=['POST'])
@@ -1085,10 +1074,10 @@ def ai_label():
         timeout = int(api_config.get('timeout', 30))
         prompt = api_config.get('prompt', '检测图中物体，返回JSON：{"detections":[{"label":"类别","confidence":0.9,"bbox":[x1,y1,x2,y2]}]}')
         model = api_config.get('model', 'qwen/qwen3-vl-8b')
-        inference_tool = api_config.get('inferenceTool', 'LMStudio')
+        inference_tool = api_config.get('inferenceTool', 'OpenAI')
         
         # 初始化AIAutoLabeler
-        labeler = AIAutoLabeler(api_url, api_key, prompt, timeout, inference_tool, model)
+        labeler = AiUtils(api_url, api_key, prompt, timeout, inference_tool, model)
         
         # 读取现有的标注信息
         annotations = {}
@@ -1132,6 +1121,13 @@ def ai_label():
                 if isinstance(detections, dict):
                     detections = [detections]
                 
+                # 获取图片实际尺寸，用于限制bbox范围
+                img = cv2.imread(image_path)
+                if img is None:
+                    logging.error(f"无法读取图片: {image_path}")
+                    continue
+                img_height, img_width = img.shape[:2]
+                
                 # 如果检测到目标，更新标注状态
                 if detections:
                     # 为每张图片创建标注
@@ -1150,6 +1146,25 @@ def ai_label():
                             if len(bbox) < 4:
                                 bbox = bbox + [0] * (4 - len(bbox))
                             x1, y1, x2, y2 = bbox[:4]  # 只取前四个值
+                            
+                            # 限制bbox坐标在图片范围内 [0, width] 和 [0, height]
+                            x1 = max(0, min(x1, img_width))
+                            y1 = max(0, min(y1, img_height))
+                            x2 = max(0, min(x2, img_width))
+                            y2 = max(0, min(y2, img_height))
+                            
+                            # 确保x1 < x2, y1 < y2
+                            if x1 > x2:
+                                x1, x2 = x2, x1
+                            if y1 > y2:
+                                y1, y2 = y2, y1
+                            
+                            # 检查裁剪后的bbox是否有效（最小面积）
+                            bbox_width = x2 - x1
+                            bbox_height = y2 - y1
+                            if bbox_width < 5 or bbox_height < 5:
+                                logging.warning(f"跳过无效bbox: {label}, 尺寸: {bbox_width}x{bbox_height}")
+                                continue
                             
                             annotation = {
                                 "id": str(uuid.uuid4()),  # 添加唯一ID
@@ -1356,10 +1371,9 @@ def save_api_config():
             return jsonify({'success': False, 'error': 'No config data provided'}), 400
         
         # 确保uploads/config目录存在
-        os.makedirs(os.path.join(UPLOAD_FOLDER, 'config'), exist_ok=True)
+        os.makedirs(os.path.join(BASE_PATH, 'uploads', 'config'), exist_ok=True)
         
-        # 保存配置到文件
-        config_path = os.path.join(UPLOAD_FOLDER, 'config', 'ai_config.json')
+        config_path = os.path.join(BASE_PATH, 'uploads', 'config', 'ai_config.json')
         with open(config_path, 'w', encoding='utf-8') as f:
             json.dump(config_data, f, indent=2, ensure_ascii=False)
         
@@ -1377,11 +1391,11 @@ def load_api_config():
     """加载API配置"""
     try:
         # 读取配置文件
-        config_path = os.path.join(UPLOAD_FOLDER, 'config', 'ai_config.json')
+        config_path = os.path.join(BASE_PATH, 'uploads', 'config', 'ai_config.json')
         if not os.path.exists(config_path):
             # 返回默认配置
             default_config = {
-                "inferenceTool": "LMStudio",
+                "inferenceTool": "OpenAI",
                 "model": "qwen/qwen3-vl-8b",
                 "apiUrl": "http://127.0.0.1:1234/v1",
                 "apiKey": "",
@@ -1415,7 +1429,7 @@ def api_test():
         api_key = request.form.get('api_key', '')
         timeout = int(request.form.get('timeout', 30))
         prompt = request.form.get('prompt', '检测图中物体，返回JSON：{"detections":[{"label":"类别","confidence":0.9,"bbox":[x1,y1,x2,y2]}]}')
-        inference_tool = request.form.get('inferenceTool', 'LMStudio')
+        inference_tool = request.form.get('inferenceTool', 'OpenAI')
         model = request.form.get('model', 'qwen/qwen3-vl-8b')
         
         # 保存临时图片文件
@@ -1425,7 +1439,7 @@ def api_test():
         
         try:
             # 初始化AIAutoLabeler
-            labeler = AIAutoLabeler(api_url, api_key, prompt, timeout, inference_tool, model)
+            labeler = AiUtils(api_url, api_key, prompt, timeout, inference_tool, model)
             
             # 调用analyze_image方法测试API
             result = labeler.analyze_image(temp_file_path)
@@ -1463,7 +1477,7 @@ def auto_label_image():
         api_key = request.form.get('api_key', '')
         timeout = int(request.form.get('timeout', 30))
         prompt = request.form.get('prompt', '检测图中物体，返回JSON：{"detections":[{"label":"类别","confidence":0.9,"bbox":[x1,y1,x2,y2]}]}')
-        inference_tool = request.form.get('inferenceTool', 'LMStudio')
+        inference_tool = request.form.get('inferenceTool', 'OpenAI')
         
         if not files:
             return jsonify({'success': False, 'error': 'No image files provided'}), 400
@@ -1485,7 +1499,7 @@ def auto_label_image():
         model = request.form.get('model', 'qwen/qwen3-vl-8b')
         
         # 初始化AIAutoLabeler
-        labeler = AIAutoLabeler(api_url, api_key, prompt, timeout, inference_tool, model)
+        labeler = AiUtils(api_url, api_key, prompt, timeout, inference_tool, model)
         
         # 处理每张图片
         for file in files:
@@ -1597,10 +1611,10 @@ def auto_label_video():
         timeout = int(api_config.get('timeout', 30))
         prompt = api_config.get('prompt', '检测图中物体，返回JSON：{"detections":[{"label":"类别","confidence":0.9,"bbox":[x1,y1,x2,y2]}]}')
         model = api_config.get('model', 'qwen/qwen3-vl-8b')
-        inference_tool = api_config.get('inferenceTool', 'LMStudio')
+        inference_tool = api_config.get('inferenceTool', 'OpenAI')
         
         # 初始化AIAutoLabeler
-        labeler = AIAutoLabeler(api_url, api_key, prompt, timeout, inference_tool, model)
+        labeler = AiUtils(api_url, api_key, prompt, timeout, inference_tool, model)
         
         # 打开视频流
         cap = cv2.VideoCapture(video_path)
@@ -1674,268 +1688,67 @@ def auto_label_video():
             'traceback': traceback.format_exc()
         }), 500
 
-@app.route('/api/check-yolo11-install')
-def check_yolo11_install():
-    """检查YOLO11安装状态"""
-    import os
-    # 检查YOLO11安装路径是否存在
-    yolo11_path = os.path.join(app.root_path, 'plugins', 'yolo11')
-    is_installed = os.path.exists(yolo11_path) and os.path.isdir(yolo11_path)
-    
-    # 初始化安装信息
-    install_info = {
-        'is_installed': is_installed,
-        'install_time': '',
-        'has_cuda': False,
-        'hardware': 'CPU'
+@app.route('/api/training/env-status')
+def training_env_status():
+    """检查训练环境状态及可用设备"""
+    result = {
+        'installed': False,
+        'version': 'unknown',
+        'torch_version': 'unknown',
+        'cuda_available': False,
+        'devices': ['CPU']
     }
     
-    # 如果已安装，读取详细的安装信息
-    if is_installed:
-        install_info_path = os.path.join(yolo11_path, 'install_info.json')
-        if os.path.exists(install_info_path):
-            try:
-                with open(install_info_path, 'r', encoding='utf-8') as f:
-                    saved_info = json.load(f)
-                    # 更新安装信息
-                    install_info.update(saved_info)
-            except Exception as e:
-                print(f"读取安装信息失败: {e}")
-    
-    return jsonify(install_info)
-
-
-@app.route('/api/install-yolo11')
-def install_yolo11():
-    """安装YOLO11"""
-    import os
-    import subprocess
-    import time
-    import datetime
-    import venv
-    from flask import Response
-    
-    # 获取安装路径
-    install_path = request.args.get('install_path', 'plugins/yolo11')
-    # 确保安装路径是相对于项目根目录的
-    if not os.path.isabs(install_path):
-        install_path = os.path.join(app.root_path, install_path)
-    
-    def generate():
-        # 发送初始状态
-        yield f"data: {json.dumps({'status': 'started', 'message': '开始安装YOLO11...', 'progress': 0})}\n\n"
-        time.sleep(0.5)
-        
+    try:
+        import ultralytics
+        result['installed'] = True
+        result['version'] = getattr(ultralytics, '__version__', 'unknown')
         try:
-            # 1. 创建安装目录
-            yield f"data: {json.dumps({'message': '创建安装目录...', 'progress': 10})}\n\n"
-            os.makedirs(install_path, exist_ok=True)
-            time.sleep(0.5)
-            
-            # 2. 创建Python虚拟环境
-            yield f"data: {json.dumps({'message': '创建Python虚拟环境...', 'progress': 20})}\n\n"
-            
-            # 创建虚拟环境
-            venv_path = os.path.join(install_path, 'venv')
-            venv.create(venv_path, with_pip=True)
-            time.sleep(0.5)
-            
-            # 3. 安装YOLO11的依赖
-            yield f"data: {json.dumps({'message': '安装YOLO11依赖...', 'progress': 40})}\n\n"
-            
-            # 获取虚拟环境中的pip路径
-            if os.name == 'nt':  # Windows
-                pip_path = os.path.join(venv_path, 'Scripts', 'pip.exe')
-                python_path = os.path.join(venv_path, 'Scripts', 'python.exe')
-            else:  # Linux/macOS
-                pip_path = os.path.join(venv_path, 'bin', 'pip')
-                python_path = os.path.join(venv_path, 'bin', 'python')
-            
-            # 升级pip
-            result = subprocess.run(
-                [python_path, '-m', 'pip', 'install', '--upgrade', 'pip'],
-                capture_output=True,
-                text=True,
-                cwd=install_path
-            )
-            
-            if result.returncode != 0:
-                yield f"data: {json.dumps({'status': 'error', 'message': f'升级pip失败: {result.stderr}', 'progress': 40})}\n\n"
-                return
-            
-            # 安装ultralytics
-            result = subprocess.run(
-                [pip_path, 'install', 'ultralytics'],
-                capture_output=True,
-                text=True,
-                cwd=install_path
-            )
-            
-            if result.returncode != 0:
-                yield f"data: {json.dumps({'status': 'error', 'message': f'安装ultralytics失败: {result.stderr}', 'progress': 50})}\n\n"
-                return
-            
-            time.sleep(0.5)
-            
-            # 4. 检查硬件支持
-            yield f"data: {json.dumps({'message': '检查硬件支持...', 'progress': 70})}\n\n"
-            
-            # 检查是否支持CUDA
-            has_cuda = False
-            try:
-                result = subprocess.run(
-                    [python_path, '-c', 'import torch; print(torch.cuda.is_available())'],
-                    capture_output=True,
-                    text=True,
-                    cwd=install_path
-                )
-                has_cuda = result.stdout.strip().lower() == 'true'
-            except Exception as e:
-                print(f"检查CUDA支持失败: {e}")
-            
-            time.sleep(0.5)
-            
-            # 5. 创建models目录
-            yield f"data: {json.dumps({'message': '创建models目录...', 'progress': 80})}\n\n"
-            models_dir = os.path.join(install_path, 'models')
-            os.makedirs(models_dir, exist_ok=True)
-            time.sleep(0.5)
-            
-            # 6. 记录安装信息
-            yield f"data: {json.dumps({'message': '记录安装信息...', 'progress': 90})}\n\n"
-            
-            install_info = {
-                'is_installed': True,
-                'install_time': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                'install_path': install_path,
-                'has_cuda': has_cuda,
-                'hardware': 'CUDA' if has_cuda else 'CPU'
-            }
-            
-            # 保存安装信息到文件
-            install_info_path = os.path.join(install_path, 'install_info.json')
-            with open(install_info_path, 'w') as f:
-                json.dump(install_info, f, indent=2, ensure_ascii=False)
-            
-            time.sleep(0.5)
-            
-            # 7. 安装完成
-            yield f"data: {json.dumps({'message': 'YOLO11安装完成！', 'progress': 100, 'status': 'completed', 'has_cuda': has_cuda})}\n\n"
-            
-        except Exception as e:
-            import traceback
-            yield f"data: {json.dumps({'status': 'error', 'message': f'安装失败: {str(e)}', 'progress': 0, 'traceback': traceback.format_exc()})}\n\n"
+            import torch
+            result['torch_version'] = getattr(torch, '__version__', 'unknown')
+            result['cuda_available'] = torch.cuda.is_available()
+            if torch.cuda.is_available():
+                result['devices'] = ['CPU', 'NVIDIA-CUDA']
+        except ImportError:
+            pass
+    except ImportError:
+        pass
     
-    return Response(generate(), mimetype='text/event-stream')
-
-
-@app.route('/api/uninstall-yolo11')
-def uninstall_yolo11():
-    """卸载YOLO11"""
-    import os
-    import shutil
-    import time
-    from flask import Response
-    
-    # 获取安装路径
-    install_path = request.args.get('install_path', 'plugins/yolo11')
-    # 确保安装路径是相对于项目根目录的
-    if not os.path.isabs(install_path):
-        install_path = os.path.join(app.root_path, install_path)
-    
-    def generate():
-        # 发送初始状态
-        yield f"data: {json.dumps({'status': 'started', 'message': '开始卸载YOLO11...', 'progress': 0})}\n\n"
-        time.sleep(0.5)
-        
-        try:
-            # 检查YOLO11是否安装
-            if not os.path.exists(install_path) or not os.path.isdir(install_path):
-                yield f"data: {json.dumps({'status': 'error', 'message': 'YOLO11未安装', 'progress': 0})}\n\n"
-                return
-            
-            # 1. 删除安装目录
-            yield f"data: {json.dumps({'message': '删除YOLO11安装目录...', 'progress': 50})}\n\n"
-            
-            # 强制删除整个YOLO11目录，包括venv文件夹
-            # 先尝试使用shutil.rmtree删除
-            shutil.rmtree(install_path, ignore_errors=False)
-            
-            # 验证是否删除成功
-            if os.path.exists(install_path):
-                # 如果shutil.rmtree失败，尝试使用os.system强制删除（针对Windows系统）
-                if os.name == 'nt':  # Windows系统
-                    os.system(f'rmdir /s /q "{install_path}"')
-                else:  # Linux/macOS系统
-                    os.system(f'rm -rf "{install_path}"')
-                
-                # 再次验证
-                if os.path.exists(install_path):
-                    raise Exception(f'无法删除目录: {install_path}')
-            
-            time.sleep(0.5)
-            
-            # 2. 卸载完成
-            yield f"data: {json.dumps({'message': 'YOLO11卸载完成！', 'progress': 100, 'status': 'completed'})}\n\n"
-            
-        except Exception as e:
-            import traceback
-            yield f"data: {json.dumps({'status': 'error', 'message': f'卸载失败: {str(e)}', 'progress': 0, 'traceback': traceback.format_exc()})}\n\n"
-    
-    return Response(generate(), mimetype='text/event-stream')
+    return jsonify(result)
 
 
 @app.route('/api/download-models')
 def download_models():
     """下载YOLO11预训练模型"""
-    import os
     import subprocess
+    import sys
     import time
     from flask import Response
     
-    # 获取模型列表和安装路径
     models_str = request.args.get('models', '')
     models = models_str.split(',') if models_str else []
-    install_path = request.args.get('install_path', 'plugins/yolo11')
     
-    # 确保安装路径是相对于项目根目录的
-    if not os.path.isabs(install_path):
-        install_path = os.path.join(app.root_path, install_path)
+    models_dir = os.path.join(app.root_path, 'pre_models')
     
     def generate():
-        # 发送初始状态
         yield f"data: {json.dumps({'status': 'started', 'message': '开始下载模型...', 'progress': 0})}\n\n"
-        time.sleep(0.5)
+        time.sleep(0.3)
         
         try:
-            # 检查YOLO11是否安装
-            if not os.path.exists(install_path) or not os.path.isdir(install_path):
-                yield f"data: {json.dumps({'status': 'error', 'message': 'YOLO11未安装', 'progress': 0})}\n\n"
+            try:
+                import ultralytics
+            except ImportError:
+                yield f"data: {json.dumps({'status': 'error', 'message': 'YOLO11训练环境未安装，请先安装', 'progress': 0})}\n\n"
                 return
             
-            # 获取虚拟环境中的python路径
-            if os.name == 'nt':  # Windows
-                python_path = os.path.join(install_path, 'venv', 'Scripts', 'python.exe')
-            else:  # Linux/macOS
-                python_path = os.path.join(install_path, 'venv', 'bin', 'python')
-            
-            # 检查python路径是否存在
-            if not os.path.exists(python_path):
-                yield f"data: {json.dumps({'status': 'error', 'message': '虚拟环境未找到', 'progress': 0})}\n\n"
-                return
-            
-            # 创建models目录
-            models_dir = os.path.join(install_path, 'models')
             os.makedirs(models_dir, exist_ok=True)
             
-            # 下载每个模型
             total_models = len(models)
             for i, model in enumerate(models):
                 yield f"data: {json.dumps({'message': f'正在下载模型: {model}...', 'progress': int((i / total_models) * 50) + 10})}\n\n"
                 
-                # 使用ultralytics的CLI下载模型
                 result = subprocess.run(
-                    [python_path, '-c', f'from ultralytics import YOLO; YOLO("{model}.pt")'],
+                    [sys.executable, '-c', f'from ultralytics import YOLO; YOLO("{model}.pt")'],
                     capture_output=True,
                     text=True,
                     cwd=models_dir
@@ -1945,9 +1758,8 @@ def download_models():
                     yield f"data: {json.dumps({'status': 'error', 'message': f'下载模型 {model} 失败: {result.stderr}', 'progress': 0})}\n\n"
                     return
                 
-                time.sleep(0.5)
+                time.sleep(0.3)
             
-            # 下载完成
             yield f"data: {json.dumps({'message': '模型下载完成！', 'progress': 100, 'status': 'completed'})}\n\n"
             
         except Exception as e:
@@ -1957,29 +1769,21 @@ def download_models():
     return Response(generate(), mimetype='text/event-stream')
 
 
-@app.route('/api/list-models')
+@app.route('/api/yolo11/models')
 def list_models():
     """获取已安装的YOLO11模型列表"""
-    import os
+    models_dir = os.path.join(app.root_path, 'pre_models')
     
-    # 获取安装路径
-    install_path = request.args.get('install_path', 'plugins/yolo11')
-    # 确保安装路径是相对于项目根目录的
-    if not os.path.isabs(install_path):
-        install_path = os.path.join(app.root_path, install_path)
-    
-    # 初始化模型列表
     models = []
     
-    # 检查YOLO11是否安装
-    if os.path.exists(install_path) and os.path.isdir(install_path):
-        # 检查models目录是否存在
-        models_dir = os.path.join(install_path, 'models')
-        if os.path.exists(models_dir) and os.path.isdir(models_dir):
-            # 列出models目录下的所有.pt文件
-            for file in os.listdir(models_dir):
-                if file.endswith('.pt'):
-                    models.append(file)
+    if os.path.exists(models_dir) and os.path.isdir(models_dir):
+        for file in os.listdir(models_dir):
+            if file.endswith('.pt'):
+                file_path = os.path.join(models_dir, file)
+                file_size = os.path.getsize(file_path)
+                if file_size < 1024:
+                    continue
+                models.append(file)
     
     return jsonify({'models': models})
 
@@ -1987,32 +1791,17 @@ def list_models():
 @app.route('/api/upload-model', methods=['POST'])
 def upload_model():
     """上传YOLO11模型文件"""
-    import os
+    models_dir = os.path.join(app.root_path, 'pre_models')
     
-    # 获取安装路径
-    install_path = request.headers.get('X-Install-Path', 'plugins/yolo11')
-    # 确保安装路径是相对于项目根目录的
-    if not os.path.isabs(install_path):
-        install_path = os.path.join(app.root_path, install_path)
-    
-    # 检查YOLO11是否安装
-    if not os.path.exists(install_path) or not os.path.isdir(install_path):
-        return jsonify({'success': False, 'error': 'YOLO11未安装'})
-    
-    # 检查是否有文件上传
     if 'files[]' not in request.files:
         return jsonify({'success': False, 'error': '未找到上传的文件'})
     
-    # 创建models目录
-    models_dir = os.path.join(install_path, 'models')
     os.makedirs(models_dir, exist_ok=True)
     
-    # 保存上传的文件
     uploaded_files = []
     files = request.files.getlist('files[]')
     for file in files:
         if file.filename != '' and file.filename.endswith('.pt'):
-            # 保存文件到models目录
             file_path = os.path.join(models_dir, file.filename)
             file.save(file_path)
             uploaded_files.append(file.filename)
@@ -2023,36 +1812,19 @@ def upload_model():
 @app.route('/api/delete-model', methods=['POST'])
 def delete_model():
     """删除YOLO11模型文件"""
-    import os
-    
-    # 获取安装路径
-    install_path = request.headers.get('X-Install-Path', 'plugins/yolo11')
-    # 确保安装路径是相对于项目根目录的
-    if not os.path.isabs(install_path):
-        install_path = os.path.join(app.root_path, install_path)
-    
-    # 获取模型名称
     data = request.json or {}
     model_name = data.get('model_name', '')
     
-    # 检查YOLO11是否安装
-    if not os.path.exists(install_path) or not os.path.isdir(install_path):
-        return jsonify({'success': False, 'error': 'YOLO11未安装'})
-    
-    # 检查模型名称是否为空
     if not model_name:
         return jsonify({'success': False, 'error': '模型名称不能为空'})
     
-    # 构建模型文件路径
-    models_dir = os.path.join(install_path, 'models')
+    models_dir = os.path.join(app.root_path, 'pre_models')
     model_path = os.path.join(models_dir, model_name)
     
-    # 检查模型文件是否存在
     if not os.path.exists(model_path):
         return jsonify({'success': False, 'error': '模型文件不存在'})
     
     try:
-        # 删除模型文件
         os.remove(model_path)
         return jsonify({'success': True, 'message': f'模型 {model_name} 删除成功'})
     except Exception as e:
@@ -2229,11 +2001,9 @@ names: {selected_classes}
                             # 只导出选中的类别
                             if ann['class'] in selected_classes:
                                 # 转换为YOLO格式: class_id center_x center_y width height (归一化)
-                                # 修改这里，使用全局类别列表中的索引而不是选中类别列表中的索引
                                 class_id = None
-                                # 从全局类别列表中查找类别ID
-                                for i, cls in enumerate(classes):
-                                    if cls['name'] == ann['class']:
+                                for i, cls_name in enumerate(selected_classes):
+                                    if cls_name == ann['class']:
                                         class_id = i
                                         break
                                 
@@ -2433,6 +2203,830 @@ def get_video_annotation_status(task_id):
             'error': str(e)
         }), 500
 
+# YOLO11训练管理
+import subprocess
+import threading
+import queue
+import time
+from datetime import datetime
+
+class TrainingTask:
+    """训练任务管理类"""
+    def __init__(self, task_id, config):
+        self.task_id = task_id
+        self.config = config
+        self.status = 'idle'  # idle, running, paused, completed, error
+        self.current_epoch = 0
+        self.total_epochs = config.get('epochs', 100)
+        self.progress = 0.0
+        self.metrics = {}
+        self.start_time = None
+        self.process = None
+        self.log_queue = queue.Queue()
+        self.error = None
+        
+    def to_dict(self):
+        return {
+            'task_id': self.task_id,
+            'status': self.status,
+            'current_epoch': self.current_epoch,
+            'total_epochs': self.total_epochs,
+            'progress': self.progress,
+            'metrics': self.metrics,
+            'start_time': self.start_time.isoformat() if self.start_time else None,
+            'error': self.error
+        }
+
+# 全局训练任务存储
+training_tasks = {}
+
+@app.route('/api/training/start', methods=['POST'])
+def start_training():
+    """开始训练任务"""
+    try:
+        config = request.json
+        task_id = f"train_{int(time.time())}"
+        
+        # 创建训练任务
+        task = TrainingTask(task_id, config)
+        training_tasks[task_id] = task
+        
+        # 启动训练线程
+        train_thread = threading.Thread(target=run_training, args=(task,), daemon=True)
+        train_thread.start()
+        
+        return jsonify({
+            'success': True,
+            'training_id': task_id,
+            'message': '训练任务已启动'
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+def run_training(task):
+    """执行训练任务"""
+    try:
+        task.status = 'running'
+        task.start_time = datetime.now()
+        
+        config = task.config
+        epochs = config.get('epochs', 100)
+        batch_size = config.get('batch_size', 16)
+        image_size = config.get('image_size', 640)
+        model = config.get('model', 'yolo11n.pt')
+        dataset = config.get('dataset', '')
+        device = config.get('device', 'CPU')
+        auto_resume = config.get('auto_resume', False)
+        
+        try:
+            import ultralytics
+        except ImportError:
+            error_msg = 'YOLO11训练环境未安装，请先安装ultralytics'
+            socketio.emit('training_log', {'message': error_msg, 'level': 'error'})
+            task.status = 'error'
+            task.error = error_msg
+            return
+        
+        data_yaml_path = os.path.join(dataset, 'data.yaml')
+        if os.path.exists(data_yaml_path):
+            try:
+                import yaml
+                with open(data_yaml_path, 'r', encoding='utf-8') as f:
+                    data_config = yaml.safe_load(f)
+                if data_config is None:
+                    data_config = {}
+                data_config['path'] = os.path.abspath(dataset)
+                
+                nc = data_config.get('nc', 0)
+                names = data_config.get('names', [])
+                if nc > 0 and isinstance(names, list) and len(names) > 0:
+                    class_name_to_id = {name: idx for idx, name in enumerate(names)}
+                    max_valid_id = nc - 1
+                    
+                    for split in ['train', 'val', 'test']:
+                        label_dir = os.path.join(dataset, split, 'labels')
+                        if not os.path.isdir(label_dir):
+                            continue
+                        for label_file in os.listdir(label_dir):
+                            if not label_file.endswith('.txt'):
+                                continue
+                            label_path = os.path.join(label_dir, label_file)
+                            fixed_lines = []
+                            need_fix = False
+                            with open(label_path, 'r', encoding='utf-8') as f:
+                                for line in f:
+                                    line = line.strip()
+                                    if not line:
+                                        continue
+                                    parts = line.split()
+                                    if len(parts) >= 5:
+                                        cid = int(parts[0])
+                                        if cid > max_valid_id:
+                                            need_fix = True
+                                            cid = max_valid_id
+                                        fixed_lines.append(f"{cid} {' '.join(parts[1:])}")
+                                    else:
+                                        fixed_lines.append(line)
+                            if need_fix:
+                                with open(label_path, 'w', encoding='utf-8') as f:
+                                    f.write('\n'.join(fixed_lines) + '\n')
+                
+                for split in ['train', 'val', 'test']:
+                    for cache_file in ['labels.cache', 'images.cache']:
+                        cache_path = os.path.join(dataset, split, cache_file)
+                        if os.path.exists(cache_path):
+                            os.remove(cache_path)
+                
+                with open(data_yaml_path, 'w', encoding='utf-8') as f:
+                    yaml.dump(data_config, f, default_flow_style=False, allow_unicode=True)
+            except Exception as e:
+                print(f'修复data.yaml路径时出错: {e}')
+        
+        train_config = {
+            'model': model,
+            'data': os.path.join(dataset, 'data.yaml'),
+            'epochs': epochs,
+            'batch_size': batch_size,
+            'image_size': image_size,
+            'project': os.path.join(app.root_path, 'runs', 'train'),
+            'name': task.task_id,
+            'exist_ok': True,
+            'optimizer': config.get('optimizer', 'SGD'),
+            'learning_rate': config.get('learning_rate', 0.01),
+            'device': 0 if device == 'NVIDIA-CUDA' else 'cpu',
+            'port': 9924,
+            'auto_resume': auto_resume
+        }
+        
+        tmp_dir = os.path.join(app.root_path, 'tmp')
+        os.makedirs(tmp_dir, exist_ok=True)
+        
+        config_path = os.path.join(tmp_dir, f'tmp_config_{task.task_id}.json')
+        with open(config_path, 'w') as f:
+            json.dump(train_config, f)
+        
+        models_dir = os.path.join(app.root_path, 'pre_models')
+        
+        train_script_path = os.path.join(tmp_dir, f'tmp_worker_{task.task_id}.py')
+        with open(train_script_path, 'w', encoding='utf-8') as f:
+            f.write(f'''# -*- coding: utf-8 -*-
+import sys
+import json
+import os
+from ultralytics import YOLO
+
+def train(config_path, task_id):
+    with open(config_path, "r", encoding="utf-8") as f:
+        config = json.load(f)
+    
+    model_name = config["model"]
+    
+    models_dir = r"{models_dir}"
+    model_path = os.path.join(models_dir, model_name)
+    
+    if os.path.exists(model_path):
+        print(f"Using model from: {{model_path}}")
+        model_name = model_path
+    else:
+        print(f"Model not found in local directory, using: {{model_name}}")
+    
+    model = YOLO(model_name)
+    
+    def on_fit_epoch_end(trainer):
+        epoch = trainer.epoch + 1
+        total_epochs = trainer.epochs
+        progress = (epoch / total_epochs) * 100
+        
+        metrics = {{}}
+        if hasattr(trainer, 'metrics') and trainer.metrics:
+            print(f"Available metrics keys: {{list(trainer.metrics.keys())}}")
+            
+            for key in trainer.metrics:
+                if 'mAP50-95' in key or 'map50-95' in key.lower():
+                    metrics['map50_95'] = float(trainer.metrics[key])
+                elif 'mAP50' in key or 'map50' in key.lower():
+                    metrics['map50'] = float(trainer.metrics[key])
+                elif 'precision' in key.lower():
+                    metrics['precision'] = float(trainer.metrics[key])
+                elif 'recall' in key.lower():
+                    metrics['recall'] = float(trainer.metrics[key])
+        
+        progress_data = {{
+            'type': 'progress',
+            'task_id': task_id,
+            'current_epoch': epoch,
+            'total_epochs': total_epochs,
+            'progress': progress,
+            'metrics': metrics
+        }}
+        print(f"TRAIN_PROGRESS:{{json.dumps(progress_data)}}")
+        
+        if metrics:
+            metrics_str = ', '.join([f'{{k}}: {{v:.4f}}' for k, v in metrics.items()])
+            print(f"Epoch {{epoch}}/{{total_epochs}} - {{metrics_str}}")
+        else:
+            print(f"Epoch {{epoch}}/{{total_epochs}} completed")
+    
+    model.add_callback("on_fit_epoch_end", on_fit_epoch_end)
+    
+    resume_training = False
+    if config.get("auto_resume", False):
+        last_pt = os.path.join(config["project"], config["name"], "weights", "last.pt")
+        if os.path.exists(last_pt):
+            print(f"Found last.pt, resuming training from: {{last_pt}}")
+            resume_training = True
+        else:
+            print("auto_resume enabled but no last.pt found, starting fresh training")
+    
+    if resume_training:
+        print("Resuming training: " + config["data"])
+        model = YOLO(os.path.join(config["project"], config["name"], "weights", "last.pt"))
+        model.add_callback("on_fit_epoch_end", on_fit_epoch_end)
+        model.train(
+            resume=True,
+            device=config.get("device", "cpu"),
+            verbose=True
+        )
+    else:
+        print("Starting training: " + config["data"])
+        model.train(
+            data=config["data"],
+            epochs=config["epochs"],
+            batch=config["batch_size"],
+            imgsz=config["image_size"],
+            project=config["project"],
+            name=config["name"],
+            exist_ok=config["exist_ok"],
+            optimizer=config["optimizer"],
+            lr0=config["learning_rate"],
+            device=config.get("device", "cpu"),
+            verbose=True
+        )
+    
+    results_file = os.path.join(config["project"], config["name"], "results.csv")
+    if os.path.exists(results_file):
+        import csv
+        with open(results_file, 'r') as rf:
+            reader = csv.DictReader(rf)
+            rows = list(reader)
+            if rows:
+                last_row = rows[-1]
+                print(f"Results CSV columns: {{list(last_row.keys())}}")
+                
+                final_metrics = {{}}
+                for key in last_row:
+                    if 'mAP50-95' in key or 'map50-95' in key.lower():
+                        final_metrics['map50_95'] = float(last_row[key])
+                    elif 'mAP50' in key or 'map50' in key.lower():
+                        final_metrics['map50'] = float(last_row[key])
+                    elif 'precision' in key.lower():
+                        final_metrics['precision'] = float(last_row[key])
+                    elif 'recall' in key.lower():
+                        final_metrics['recall'] = float(last_row[key])
+                
+                complete_data = {{
+                    'type': 'complete',
+                    'task_id': task_id,
+                    'metrics': final_metrics
+                }}
+                print(f"TRAIN_COMPLETE:{{json.dumps(complete_data)}}")
+                print(f"Final metrics: {{final_metrics}}")
+
+if __name__ == "__main__":
+    train(sys.argv[1], sys.argv[2])
+''')
+        
+        socketio.emit('training_log', {
+            'message': f'开始训练: 模型={model}, 数据={train_config["data"]}, Epochs={epochs}, 设备={device}',
+            'level': 'info'
+        })
+        
+        process = subprocess.Popen(
+            [sys.executable, train_script_path, config_path, task.task_id],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            universal_newlines=True,
+            encoding='utf-8',
+            errors='ignore',
+            bufsize=1,
+            cwd=app.root_path
+        )
+        task.process = process
+        
+        for line in process.stdout:
+            line = line.strip()
+            if not line:
+                continue
+            
+            if line.startswith('TRAIN_PROGRESS:'):
+                try:
+                    progress_json = line.replace('TRAIN_PROGRESS:', '')
+                    progress_data = json.loads(progress_json)
+                    
+                    task.current_epoch = progress_data['current_epoch']
+                    task.progress = progress_data['progress']
+                    task.metrics.update(progress_data.get('metrics', {}))
+                    
+                    socketio.emit('training_progress', {
+                        'task_id': task.task_id,
+                        'current_epoch': progress_data['current_epoch'],
+                        'total_epochs': progress_data['total_epochs'],
+                        'progress': progress_data['progress'],
+                        'metrics': progress_data.get('metrics', {})
+                    })
+                except Exception as e:
+                    print(f"Failed to parse progress: {e}")
+            elif line.startswith('TRAIN_COMPLETE:'):
+                try:
+                    complete_json = line.replace('TRAIN_COMPLETE:', '')
+                    complete_data = json.loads(complete_json)
+                    
+                    task.metrics.update(complete_data.get('metrics', {}))
+                    
+                    socketio.emit('training_complete', {
+                        'task_id': task.task_id,
+                        'metrics': complete_data.get('metrics', {})
+                    })
+                except Exception as e:
+                    print(f"Failed to parse complete: {e}")
+            else:
+                socketio.emit('training_log', {'message': line, 'level': 'info'})
+        
+        process.wait()
+        
+        if os.path.exists(config_path):
+            os.remove(config_path)
+        if os.path.exists(train_script_path):
+            os.remove(train_script_path)
+        
+        if process.returncode == 0:
+            task.status = 'completed'
+            task.progress = 100.0
+            socketio.emit('training_log', {'message': '训练完成！', 'level': 'success'})
+            socketio.emit('training_complete', {
+                'task_id': task.task_id,
+                'metrics': task.metrics
+            })
+        else:
+            task.status = 'error'
+            task.error = f'训练失败，返回码: {process.returncode}'
+            socketio.emit('training_log', {'message': task.error, 'level': 'error'})
+            socketio.emit('training_error', {
+                'task_id': task.task_id,
+                'error': task.error
+            })
+            
+    except Exception as e:
+        task.status = 'error'
+        task.error = str(e)
+        socketio.emit('training_log', {'message': f'训练异常: {str(e)}', 'level': 'error'})
+        socketio.emit('training_error', {
+            'task_id': task.task_id,
+            'error': str(e)
+        })
+
+@app.route('/api/training/stop', methods=['POST'])
+def stop_training():
+    """停止训练任务"""
+    try:
+        data = request.json
+        task_id = data.get('training_id')
+        
+        if task_id not in training_tasks:
+            return jsonify({
+                'success': False,
+                'error': '任务不存在'
+            }), 404
+        
+        task = training_tasks[task_id]
+        
+        if task.status != 'running':
+            return jsonify({
+                'success': False,
+                'error': '任务未在运行中'
+            }), 400
+        
+        # 终止进程
+        if task.process:
+            task.process.terminate()
+            task.process.wait(timeout=5)
+        
+        task.status = 'completed'
+        socketio.emit('training_log', {'message': '训练已手动停止', 'level': 'warning'})
+        
+        return jsonify({
+            'success': True,
+            'message': '训练已停止'
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/training/status/<task_id>')
+def get_training_status(task_id):
+    """获取训练任务状态"""
+    if task_id not in training_tasks:
+        return jsonify({
+            'success': False,
+            'error': '任务不存在'
+        }), 404
+    
+    task = training_tasks[task_id]
+    return jsonify({
+        'success': True,
+        'task': task.to_dict()
+    })
+
+@app.route('/api/training/history')
+def get_training_history():
+    """获取训练历史记录"""
+    history = []
+    for task_id, task in training_tasks.items():
+        history.append(task.to_dict())
+    
+    # 按时间倒序
+    history.sort(key=lambda x: x.get('start_time') or '', reverse=True)
+    
+    return jsonify({
+        'success': True,
+        'history': history
+    })
+
+@app.route('/api/training/active')
+def get_active_training():
+    """获取当前活跃或最近的训练任务"""
+    latest_task = None
+    latest_time = None
+    for task_id, task in training_tasks.items():
+        if task.status in ('running', 'paused'):
+            return jsonify({
+                'success': True,
+                'task': task.to_dict()
+            })
+        if task.start_time and (latest_time is None or task.start_time > latest_time):
+            latest_task = task
+            latest_time = task.start_time
+    if latest_task:
+        return jsonify({
+            'success': True,
+            'task': latest_task.to_dict()
+        })
+    return jsonify({
+        'success': True,
+        'task': None
+    })
+
+@app.route('/api/training/download/<task_id>')
+def download_trained_model(task_id):
+    """下载训练好的模型"""
+    import os
+    
+    model_path = f'runs/train/{task_id}/weights/best.pt'
+    
+    if not os.path.exists(model_path):
+        return jsonify({
+            'success': False,
+            'error': '模型文件不存在'
+        }), 404
+    
+    return send_file(
+        model_path,
+        as_attachment=True,
+        download_name=f'{task_id}_best.pt'
+    )
+
+
+@app.route('/api/training/available-models')
+def available_trained_models():
+    """获取已训练好的模型列表"""
+    models = []
+    runs_dir = os.path.join(app.root_path, 'runs', 'train')
+    
+    if os.path.exists(runs_dir) and os.path.isdir(runs_dir):
+        for name in os.listdir(runs_dir):
+            best_path = os.path.join(runs_dir, name, 'weights', 'best.pt')
+            if os.path.exists(best_path):
+                import time as _time
+                mtime = os.path.getmtime(best_path)
+                models.append({
+                    'task_id': name,
+                    'best_path': best_path,
+                    'train_time': datetime.fromtimestamp(mtime).strftime('%Y-%m-%d %H:%M:%S')
+                })
+    
+    models.sort(key=lambda x: x['train_time'], reverse=True)
+    return jsonify({'success': True, 'models': models})
+
+
+@app.route('/api/training/model-info/<task_id>')
+def get_model_info(task_id):
+    """获取指定训练模型的详细信息"""
+    run_dir = os.path.join(app.root_path, 'runs', 'train', task_id)
+    if not os.path.exists(run_dir):
+        return jsonify({'success': False, 'error': '模型目录不存在'})
+
+    info = {'task_id': task_id, 'metrics': {}}
+
+    results_csv = os.path.join(run_dir, 'results.csv')
+    if os.path.exists(results_csv):
+        try:
+            import csv
+            with open(results_csv, 'r') as f:
+                reader = csv.DictReader(f)
+                rows = list(reader)
+                if rows:
+                    last_row = rows[-1]
+                    for key in last_row:
+                        k = key.strip()
+                        v = last_row[key].strip()
+                        if 'mAP50-95' in k or 'map50-95' in k.lower():
+                            info['metrics']['map50_95'] = float(v)
+                        elif 'mAP50' in k or 'map50' in k.lower():
+                            info['metrics']['map50'] = float(v)
+                        elif 'precision' in k.lower():
+                            info['metrics']['precision'] = float(v)
+                        elif 'recall' in k.lower():
+                            info['metrics']['recall'] = float(v)
+        except Exception as e:
+            print(f'读取results.csv失败: {e}')
+
+    best_path = os.path.join(run_dir, 'weights', 'best.pt')
+    last_path = os.path.join(run_dir, 'weights', 'last.pt')
+    info['has_best'] = os.path.exists(best_path)
+    info['has_last'] = os.path.exists(last_path)
+    if info['has_best']:
+        info['best_size'] = os.path.getsize(best_path)
+    if info['has_last']:
+        info['last_size'] = os.path.getsize(last_path)
+
+    args_yaml = os.path.join(run_dir, 'args.yaml')
+    if os.path.exists(args_yaml):
+        try:
+            import yaml
+            with open(args_yaml, 'r', encoding='utf-8') as f:
+                args = yaml.safe_load(f)
+                if args:
+                    info['args'] = {
+                        'epochs': args.get('epochs', ''),
+                        'batch': args.get('batch', ''),
+                        'imgsz': args.get('imgsz', ''),
+                        'optimizer': args.get('optimizer', ''),
+                        'lr0': args.get('lr0', ''),
+                        'device': args.get('device', ''),
+                        'model': os.path.basename(str(args.get('model', ''))),
+                        'data': os.path.basename(str(args.get('data', '')))
+                    }
+        except Exception:
+            pass
+
+    return jsonify({'success': True, 'info': info})
+
+
+@app.route('/api/training/test-model', methods=['POST'])
+def test_trained_model():
+    """使用训练好的best.pt模型测试图片"""
+    import base64
+    import tempfile
+    import numpy as np
+    
+    try:
+        try:
+            from ultralytics import YOLO
+        except ImportError:
+            return jsonify({'success': False, 'error': 'ultralytics未安装'}), 400
+        
+        task_id = request.form.get('task_id', '')
+        if not task_id:
+            return jsonify({'success': False, 'error': '缺少task_id'}), 400
+        
+        model_path = os.path.join(app.root_path, 'runs', 'train', task_id, 'weights', 'best.pt')
+        if not os.path.exists(model_path):
+            return jsonify({'success': False, 'error': 'best.pt模型文件不存在，请先完成训练'}), 404
+        
+        if 'image' not in request.files:
+            return jsonify({'success': False, 'error': '未找到上传的图片'}), 400
+        
+        file = request.files['image']
+        if file.filename == '':
+            return jsonify({'success': False, 'error': '未选择图片'}), 400
+        
+        file_bytes = file.read()
+        nparr = np.frombuffer(file_bytes, np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        if img is None:
+            return jsonify({'success': False, 'error': '图片解码失败'}), 400
+        
+        model = YOLO(model_path)
+        results = model(img, verbose=False)
+        
+        annotated = results[0].plot()
+        
+        _, buffer = cv2.imencode('.jpg', annotated)
+        img_base64 = base64.b64encode(buffer).decode('utf-8')
+        
+        detections = []
+        for result in results:
+            boxes = result.boxes
+            if boxes is not None:
+                for box in boxes:
+                    x1, y1, x2, y2 = box.xyxy[0].tolist()
+                    conf = float(box.conf[0])
+                    cls = int(box.cls[0])
+                    cls_name = result.names.get(cls, str(cls))
+                    detections.append({
+                        'class': cls_name,
+                        'confidence': round(conf, 4),
+                        'bbox': [round(x1, 1), round(y1, 1), round(x2, 1), round(y2, 1)]
+                    })
+        
+        return jsonify({
+            'success': True,
+            'image': f'data:image/jpeg;base64,{img_base64}',
+            'detections': detections,
+            'count': len(detections)
+        })
+        
+    except Exception as e:
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }), 500
+
+@app.route('/api/training/upload-dataset', methods=['POST'])
+def upload_dataset():
+    """上传并解压数据集ZIP文件"""
+    import os
+    import zipfile
+    import shutil
+    
+    try:
+        # 检查是否有文件上传
+        if 'dataset' not in request.files:
+            return jsonify({
+                'success': False,
+                'error': '未找到上传的文件'
+            }), 400
+        
+        file = request.files['dataset']
+        
+        if file.filename == '':
+            return jsonify({
+                'success': False,
+                'error': '未选择文件'
+            }), 400
+        
+        # 检查是否为ZIP文件
+        if not file.filename.endswith('.zip'):
+            return jsonify({
+                'success': False,
+                'error': '请上传ZIP格式的文件'
+            }), 400
+        
+        # 创建上传目录
+        upload_dir = os.path.join(app.root_path, 'uploads', 'training_datasets')
+        os.makedirs(upload_dir, exist_ok=True)
+        
+        zip_path = os.path.join(upload_dir, file.filename)
+        file.save(zip_path)
+        
+        dataset_name = os.path.splitext(file.filename)[0]
+        extract_dir = os.path.join(upload_dir, dataset_name)
+        
+        if os.path.exists(extract_dir):
+            shutil.rmtree(extract_dir)
+        
+        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            zip_ref.extractall(extract_dir)
+        
+        os.remove(zip_path)
+        
+        data_yaml_path = os.path.join(extract_dir, 'data.yaml')
+        if not os.path.exists(data_yaml_path):
+            for root, dirs, files in os.walk(extract_dir):
+                if 'data.yaml' in files or 'data.yml' in files:
+                    data_yaml_path = os.path.join(root, 'data.yaml' if 'data.yaml' in files else 'data.yml')
+                    extract_dir = root
+                    break
+            
+            if not os.path.exists(data_yaml_path):
+                shutil.rmtree(extract_dir)
+                return jsonify({
+                    'success': False,
+                    'error': '数据集中未找到data.yaml文件，请确保导出格式正确'
+                }), 400
+        
+        try:
+            import yaml
+            
+            with open(data_yaml_path, 'r', encoding='utf-8') as f:
+                data_config = yaml.safe_load(f)
+            
+            if data_config is None:
+                data_config = {}
+            
+            data_config['path'] = os.path.abspath(extract_dir)
+            
+            with open(data_yaml_path, 'w', encoding='utf-8') as f:
+                yaml.dump(data_config, f, default_flow_style=False, allow_unicode=True)
+            
+            print(f'已修复 {data_yaml_path} 中的路径配置: {data_config["path"]}')
+        except Exception as e:
+            print(f'修复data.yaml路径时出错: {e}')
+        
+        return jsonify({
+            'success': True,
+            'dataset_path': extract_dir,
+            'dataset_name': dataset_name,
+            'message': f'数据集上传成功: {dataset_name}'
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'上传失败: {str(e)}'
+        }), 500
+
+@app.route('/api/training/datasets')
+def list_datasets():
+    """获取已上传的数据集列表"""
+    import os
+    
+    try:
+        upload_dir = os.path.join(app.root_path, 'uploads', 'training_datasets')
+        
+        datasets = []
+        if os.path.exists(upload_dir):
+            for item in os.listdir(upload_dir):
+                item_path = os.path.join(upload_dir, item)
+                if os.path.isdir(item_path):
+                    # 检查是否包含data.yaml
+                    data_yaml_path = os.path.join(item_path, 'data.yaml')
+                    if os.path.exists(data_yaml_path):
+                        datasets.append({
+                            'name': item,
+                            'path': item_path
+                        })
+        
+        return jsonify({
+            'success': True,
+            'datasets': datasets
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'获取数据集列表失败: {str(e)}'
+        }), 500
+
+
+@app.route('/api/training/remove-dataset', methods=['POST'])
+def remove_dataset():
+    """移除已上传的数据集"""
+    import os
+    import shutil
+    
+    try:
+        data = request.json
+        dataset_path = data.get('dataset_path')
+        
+        if not dataset_path:
+            return jsonify({
+                'success': False,
+                'error': '未指定数据集路径'
+            }), 400
+        
+        # 安全检查，防止路径遍历攻击
+        if '..' in dataset_path or dataset_path.startswith('/'):
+            return jsonify({
+                'success': False,
+                'error': '无效的数据集路径'
+            }), 400
+        
+        # 检查路径是否存在
+        if not os.path.exists(dataset_path):
+            return jsonify({
+                'success': False,
+                'error': '数据集不存在'
+            }), 404
+        
+        # 删除数据集目录
+        shutil.rmtree(dataset_path)
+        
+        return jsonify({
+            'success': True,
+            'message': '数据集已移除'
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'移除失败: {str(e)}'
+        }), 500
+
 # SocketIO事件处理
 @socketio.on('connect')
 def handle_connect():
@@ -2462,25 +3056,15 @@ def handle_disconnect(sid):
         print(f'移除连接和任务的关联: {sid} -> {task_id}')
 
 if __name__ == '__main__':
-    import argparse
-    
+
     # 解析命令行参数
-    parser = argparse.ArgumentParser(description='xclabel图像标注工具')
+    parser = argparse.ArgumentParser(description='xclabel')
     parser.add_argument('--host', type=str, default='0.0.0.0', help='绑定的IP地址，默认0.0.0.0')
-    parser.add_argument('--port', type=int, default=5000, help='绑定的端口，默认5000')
+    parser.add_argument('--port', type=int, default=9924, help='绑定的端口，默认9924')
     parser.add_argument('--debug', action='store_true', default=True, help='启用调试模式，默认开启')
     args = parser.parse_args()
     
     # 使用SocketIO运行应用，使用命令行参数
-    socketio.run(app, debug=args.debug, host=args.host, port=args.port)
+    socketio.run(app, debug=args.debug, host=args.host, port=args.port, allow_unsafe_werkzeug=True)
 
-
-def process_content_data(content_data, annotations):
-    """处理内容数据并提取标注"""
-    print(f"处理内容数据: {content_data}")
-    # TODO: 在这里添加您的自定义处理代码
-
-def process_list_data(data_list, annotations):
-    """处理列表数据并提取标注"""
-    print(f"处理列表数据: {data_list}")
-    # TODO: 在这里添加您的自定义处理代码
+训练进度

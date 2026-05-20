@@ -3,10 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI配置 - xclabel</title>
+    <link rel="icon" href="/static/images/logo.ico">
+    <title>AI配置-xclabel</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='all.min.css') }}">
-    <script src="https://cdn.socket.io/4.6.0/socket.io.min.js"></script>
+    <script src="/static/socket.io/4.6.0/socket.io.min.js"></script>
     <style>
         /* 自动标注页面样式 */
         .auto-label-container {
@@ -517,11 +518,8 @@
                 <h1 style="cursor: pointer;" onclick="window.location.href='/'">xclabel <span class="version">{{ version }}</span></h1>
             </div>
             <div class="nav-buttons">
-                <button class="btn btn-primary" onclick="window.location.href='/file-manager'">
-                    <i class="fas fa-folder-open"></i> 文件管理
-                </button>
-                <button class="btn btn-secondary" onclick="window.location.href='/'">
-                    <i class="fas fa-home"></i> 返回主页
+                <button class="btn btn-secondary" id="closeAiConfigBtn">
+                    <i class="fas fa-times"></i> 关闭
                 </button>
             </div>
         </header>
@@ -549,11 +547,7 @@
                             <div class="input-with-icon">
                                 <i class="fas fa-server"></i>
                                 <select id="inferenceTool" class="with-icon">
-                                <option value="LMStudio" selected>LMStudio</option>
-                                <option value="vLLM">vLLM</option>
-                                <option value="ollama">ollama</option>
-                                <option value="阿里云大模型">阿里云大模型</option>
-                                <option value="HyperLPR">HyperLPR</option>
+                                <option value="OpenAI" selected>OpenAI</option>
                             </select>
                             </div>
                         </div>
@@ -812,6 +806,28 @@
 
         // 页面加载完成后初始化
         document.addEventListener('DOMContentLoaded', function() {
+            // 检测是否在iframe中，如果是则隐藏顶部导航栏
+            if (window.self !== window.top) {
+                // 在iframe中，隐藏导航栏
+                const navbar = document.querySelector('.navbar');
+                if (navbar) {
+                    navbar.style.display = 'none';
+                }
+                // 调整容器高度
+                const container = document.querySelector('.auto-label-container');
+                if (container) {
+                    container.style.paddingTop = '0';
+                }
+            } else {
+                // 独立页面模式，设置关闭按钮行为
+                const closeBtn = document.getElementById('closeAiConfigBtn');
+                if (closeBtn) {
+                    closeBtn.onclick = function() {
+                        window.location.href = '/';
+                    };
+                }
+            }
+            
             // 初始化SocketIO连接
             initSocketIO();
 

@@ -1,5 +1,6 @@
 import cv2
 import os
+import base64
 import requests
 import json
 import re
@@ -8,12 +9,7 @@ from typing import List, Dict, Any
 import time
 import logging
 from collections import deque
-
-# 尝试导入OpenAI库，用于调用阿里云大模型
-try:
-    from openai import OpenAI
-except ImportError:
-    OpenAI = None
+from openai import OpenAI
 
 # 默认日志配置
 logging.basicConfig(
@@ -21,10 +17,10 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 
-class AIAutoLabeler:
+class AiUtils:
     """AI自动标注工具类，封装了与大模型API交互和视频处理的核心功能"""
     
-    def __init__(self, model_api_url: str, api_key: str = None, prompt: str = None, timeout: int = 30, inference_tool: str = "LMStudio", model: str = "qwen/qwen3-vl-8b"):
+    def __init__(self, model_api_url: str, api_key: str = None, prompt: str = None, timeout: int = 30, inference_tool: str = "OpenAI", model: str = "qwen/qwen3-vl-8b"):
         """初始化自动标注器
         
         Args:
@@ -32,7 +28,7 @@ class AIAutoLabeler:
             api_key: API密钥（如果需要）
             prompt: 自定义提示词
             timeout: HTTP请求超时时间（秒）
-            inference_tool: 推理工具，支持LMStudio、vLLM、ollama
+            inference_tool: 推理工具，支持OpenAI
             model: 模型名称
         """
         self.model_api_url = model_api_url
@@ -61,343 +57,6 @@ class AIAutoLabeler:
             "default": (0, 255, 255)
         }
     
-    def analyze_image_alibaba(self, image_path: str) -> Dict[str, Any]:
-        """调用阿里云大模型API分析图像
-        
-        Args:
-            image_path: 图像文件路径
-            
-        Returns:
-            大模型返回的分析结果
-        """
-        import base64
-        import numpy as np
-        
-        if OpenAI is None:
-            raise Exception("OpenAI库未安装，请使用pip install openai安装")
-        
-        # 读取图像
-        img = cv2.imread(image_path)
-        if img is None:
-            raise ValueError(f"无法读取图像: {image_path}")
-        
-        # 保存原始图片尺寸
-        original_h, original_w = img.shape[:2]
-        
-        # 阿里云大模型可能需要较小的图像尺寸
-        # 按照参考代码中的缩放比例
-        resize_h = int(original_h / 3)
-        resize_w = int(original_w / 3)
-        image = cv2.resize(img, (resize_w, resize_h), interpolation=cv2.INTER_NEAREST)
-        
-        # 转换为JPEG格式
-        encoded_image_byte = cv2.imencode(".jpg", image)[1].tobytes()
-        image_base64 = base64.b64encode(encoded_image_byte).decode("utf-8")
-        
-        # 初始化OpenAI客户端
-        client = OpenAI(
-            api_key=self.api_key,
-            base_url="https://dashscope.aliyuncs.com/compatible-mode/v1"
-        )
-        
-        # 构建请求消息
-        messages = [
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/jpeg;base64,{image_base64}"
-                        },
-                    },
-                    {"type": "text", "text": self.prompt},
-                ],
-            }
-        ]
-        
-        # 发送请求
-        try:
-            t1 = time.time()
-            completion = client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-            )
-            t2 = time.time()
-            t_len = t2 - t1
-            logging.info(f"阿里云大模型请求耗时: {t_len:.2f}秒")
-            
-            content = completion.choices[0].message.content
-            logging.info(f"阿里云大模型原始响应: {content}")
-            
-            # 尝试解析阿里云返回的特殊格式
-            # 阿里云返回格式可能是：```json{"detections":[...]``` 或数组格式 [ {...} ]
-            # 尝试多种解析方式
-            result_json = {"detections": []}
-            
-            # 尝试去除可能的Markdown格式
-            if content.startswith('```json'):
-                content = content[7:]
-            if content.endswith('```'):
-                content = content[:-3]
-            content = content.strip()
-            
-            # 初始化detections变量，避免引用前未赋值的错误
-            detections = []
-            
-            # 首先尝试直接解析JSON，这是最可靠的方法
-            try:
-                # 直接解析JSON
-                parsed_json = json.loads(content)
-                
-                # 检查解析结果类型
-                if isinstance(parsed_json, dict):
-                    # 如果是字典，直接获取detections字段
-                    detections = parsed_json.get("detections", [])
-                    if isinstance(detections, dict):
-                        detections = [detections]
-                elif isinstance(parsed_json, list):
-                    # 如果是数组，直接作为检测结果
-                    detections = parsed_json
-                else:
-                    # 其他类型，默认为空列表
-                    detections = []
-                
-                # 处理检测结果
-                scale = 3.0  # 因为之前缩小了1/3，所以需要放大3倍
-                for detection in detections:
-                    if isinstance(detection, dict):
-                        label = detection.get("label", "unknown")
-                        confidence = detection.get("confidence", 0.0)
-                        bbox = detection.get("bbox", [])
-                        
-                        # 确保bbox是有效的
-                        if bbox:
-                            # 处理不同格式的bbox
-                            if isinstance(bbox, list):
-                                # 如果bbox是列表，确保只取前4个值
-                                bbox_values = list(map(float, bbox[:4]))
-                            else:
-                                # 如果bbox是字符串或其他类型，尝试转换
-                                bbox_str = str(bbox)
-                                # 清理bbox值，只保留数字和逗号
-                                clean_bbox = re.sub(r'[^0-9, ]', '', bbox_str)
-                                # 移除多余空格
-                                clean_bbox = re.sub(r'\s+', ' ', clean_bbox).strip()
-                                # 确保格式为"x1,y1,x2,y2"
-                                clean_bbox = re.sub(r'\s*,\s*', ',', clean_bbox)
-                                # 分割并转换为浮点数
-                                bbox_values = list(map(float, clean_bbox.split(',')))
-                                # 只取前4个值
-                                bbox_values = bbox_values[:4]
-                            
-                            if len(bbox_values) == 4:
-                                # 转换坐标到原始尺寸
-                                x1, y1, x2, y2 = bbox_values
-                                x1 = int(x1 * scale)
-                                y1 = int(y1 * scale)
-                                x2 = int(x2 * scale)
-                                y2 = int(y2 * scale)
-                                
-                                # 添加到检测结果
-                                result_json["detections"].append({
-                                    "label": label,
-                                    "confidence": confidence,
-                                    "bbox": [x1, y1, x2, y2]
-                                })
-                
-                # 如果直接解析JSON成功并获取到了检测结果，直接返回
-                if result_json["detections"]:
-                    return result_json
-            except json.JSONDecodeError:
-                # 如果直接解析JSON失败，再尝试正则表达式提取
-                logging.info(f"直接解析JSON失败，尝试使用正则表达式提取: {content}")
-                
-                # 使用正则表达式提取检测信息
-                import re
-                
-                # 匹配模式：{"label":"自行车","confidence":0.9,"bbox":[[672,18,745,83]}
-                detection_pattern = r'\{[^}]*"label"\s*:\s*"([^"]+)"[^}]*"confidence"\s*:\s*([0-9.]+)[^}]*"bbox"\s*:\s*\[*([0-9, ]+)\]*[^}]*\}'
-                matches = re.findall(detection_pattern, content, re.DOTALL)
-                
-                if matches:
-                    scale = 3.0  # 因为之前缩小了1/3，所以需要放大3倍
-                    for match in matches:
-                        label = match[0]
-                        confidence = float(match[1])
-                        bbox_str = match[2]
-                        
-                        # 清理bbox值，只保留数字和逗号
-                        clean_bbox = re.sub(r'[^0-9, ]', '', bbox_str)
-                        # 移除多余空格
-                        clean_bbox = re.sub(r'\s+', ' ', clean_bbox).strip()
-                        # 确保格式为"x1,y1,x2,y2"
-                        clean_bbox = re.sub(r'\s*,\s*', ',', clean_bbox)
-                        
-                        # 分割并转换为浮点数
-                        try:
-                            bbox_values = list(map(float, clean_bbox.split(',')))
-                            # 只取前4个值
-                            bbox_values = bbox_values[:4]
-                            
-                            if len(bbox_values) == 4:
-                                # 转换坐标到原始尺寸
-                                x1, y1, x2, y2 = bbox_values
-                                x1 = int(x1 * scale)
-                                y1 = int(y1 * scale)
-                                x2 = int(x2 * scale)
-                                y2 = int(y2 * scale)
-                                
-                                # 添加到检测结果
-                                result_json["detections"].append({
-                                    "label": label,
-                                    "confidence": confidence,
-                                    "bbox": [x1, y1, x2, y2]
-                                })
-                        except ValueError:
-                            # 如果转换失败，跳过此检测
-                            logging.warning(f"无法解析bbox值: {clean_bbox}")
-                            continue
-                else:
-                    # 尝试另一种方法：手动解析字符串
-                    try:
-                        # 提取label
-                        label_match = re.search(r'"label"\s*:\s*"([^"]+)"', content)
-                        # 提取confidence
-                        confidence_match = re.search(r'"confidence"\s*:\s*([0-9.]+)', content)
-                        # 提取bbox值
-                        bbox_match = re.search(r'"bbox"\s*:\s*\[*([0-9, ]+)\]*', content)
-                        
-                        if label_match and confidence_match and bbox_match:
-                            label = label_match.group(1)
-                            confidence = float(confidence_match.group(1))
-                            bbox_str = bbox_match.group(1)
-                            
-                            # 清理bbox值
-                            clean_bbox = re.sub(r'[^0-9, ]', '', bbox_str)
-                            clean_bbox = re.sub(r'\s+', ' ', clean_bbox).strip()
-                            clean_bbox = re.sub(r'\s*,\s*', ',', clean_bbox)
-                            
-                            # 分割并转换为浮点数
-                            bbox_values = list(map(float, clean_bbox.split(',')))
-                            bbox_values = bbox_values[:4]
-                            
-                            if len(bbox_values) == 4:
-                                scale = 3.0
-                                x1, y1, x2, y2 = bbox_values
-                                x1 = int(x1 * scale)
-                                y1 = int(y1 * scale)
-                                x2 = int(x2 * scale)
-                                y2 = int(y2 * scale)
-                                
-                                result_json["detections"].append({
-                                    "label": label,
-                                    "confidence": confidence,
-                                    "bbox": [x1, y1, x2, y2]
-                                })
-                    except Exception as e:
-                        # 最后尝试直接从字符串中提取数字
-                        try:
-                            # 提取所有数字
-                            all_numbers = re.findall(r'\d+\.?\d*', content)
-                            if len(all_numbers) >= 5:  # label + confidence + 4 bbox values
-                                # 假设格式是：label, confidence, x1, y1, x2, y2
-                                label = "unknown"  # 默认标签
-                                confidence = float(all_numbers[0])
-                                x1 = float(all_numbers[1])
-                                y1 = float(all_numbers[2])
-                                x2 = float(all_numbers[3])
-                                y2 = float(all_numbers[4])
-                                
-                                scale = 3.0
-                                x1 = int(x1 * scale)
-                                y1 = int(y1 * scale)
-                                x2 = int(x2 * scale)
-                                y2 = int(y2 * scale)
-                                
-                                result_json["detections"].append({
-                                    "label": label,
-                                    "confidence": confidence,
-                                    "bbox": [x1, y1, x2, y2]
-                                })
-                        except Exception as final_e:
-                            error_msg = f"无法解析阿里云模型返回的JSON: {content}"
-                            logging.error(error_msg)
-                            # 不再抛出异常，而是返回空结果，这样不会导致整个标注失败
-                            result_json = {"detections": []}
-            
-            return result_json
-        except Exception as e:
-            error_msg = f"阿里云大模型分析图像失败: {str(e)}"
-            logging.error(error_msg)
-            raise Exception(error_msg)
-    
-    def analyze_image_hyperlpr(self, image_path: str) -> Dict[str, Any]:
-        """调用HyperLPR API分析图像进行车牌识别
-        
-        Args:
-            image_path: 图像文件路径
-            
-        Returns:
-            车牌识别结果
-        """
-        import os
-        
-        # 构建请求数据
-        files = {
-            "file": (os.path.basename(image_path), open(image_path, "rb"), "image/jpeg")
-        }
-        
-        # 确保API地址以正确的端点结尾
-        api_endpoint = self.model_api_url
-        if not api_endpoint.endswith("/api/v1/rec"):
-            if api_endpoint.endswith("/"):
-                api_endpoint = f"{api_endpoint}api/v1/rec"
-            else:
-                api_endpoint = f"{api_endpoint}/api/v1/rec"
-        
-        # 发送请求
-        try:
-            response = self.session.post(api_endpoint, files=files, timeout=self.timeout)
-            
-            # 记录请求详情以便调试
-            logging.info(f"发送HyperLPR API请求到: {api_endpoint}")
-            
-            # 关闭文件
-            files["file"][1].close()
-            
-            # 检查响应状态码
-            if not response.ok:
-                # 记录响应详情
-                logging.error(f"HyperLPR API请求失败，状态码: {response.status_code}")
-                logging.error(f"响应内容: {response.text}")
-                raise Exception(f"HyperLPR API请求失败，状态码: {response.status_code}")
-            
-            result = response.json()
-            logging.info(f"HyperLPR API响应: {json.dumps(result, ensure_ascii=False)}")
-            
-            # 解析车牌识别结果
-            detections = []
-            if result.get("code") == 5000 and result.get("result"):
-                plate_list = result["result"].get("plate_list", [])
-                for plate in plate_list:
-                    detections.append({
-                        "label": plate.get("code", "未知车牌"),
-                        "confidence": plate.get("conf", 0.0),
-                        "bbox": plate.get("box", [0, 0, 0, 0]),
-                        "plate_type": plate.get("plate_type", "蓝牌")
-                    })
-            
-            return {"detections": detections}
-        except Exception as e:
-            # 确保文件被关闭
-            if "file" in locals() and hasattr(files["file"][1], "close"):
-                files["file"][1].close()
-            
-            error_msg = f"HyperLPR分析图像失败: {str(e)}"
-            logging.error(error_msg)
-            raise Exception(error_msg)
-    
     def analyze_image(self, image_path: str) -> Dict[str, Any]:
         """调用大模型API分析图像
         
@@ -407,167 +66,143 @@ class AIAutoLabeler:
         Returns:
             大模型返回的分析结果
         """
-        # 根据推理工具类型调用不同的分析方法
-        if self.inference_tool == "阿里云大模型":
-            result = self.analyze_image_alibaba(image_path)
-            # 确保返回的是字典格式
-            if isinstance(result, dict):
-                return result
-            else:
-                logging.error(f"阿里云大模型返回了非字典格式结果: {result}")
-                return {"detections": []}
-        elif self.inference_tool == "HyperLPR":
-            result = self.analyze_image_hyperlpr(image_path)
-            # 确保返回的是字典格式
-            if isinstance(result, dict):
-                return result
-            else:
-                logging.error(f"HyperLPR返回了非字典格式结果: {result}")
-                return {"detections": []}
-        
-        # 原有的分析逻辑保留
-        import base64
-        import numpy as np
-        
-        headers = {
-            "Content-Type": "application/json"
-        }
-        if self.api_key:
-            headers["Authorization"] = f"Bearer {self.api_key}"
-        
-        # 确保API地址以正确的端点结尾
-        api_endpoint = self.model_api_url
-        if api_endpoint.endswith("/v1"):
-            api_endpoint = f"{api_endpoint}/chat/completions"
-        elif not api_endpoint.endswith("/chat/completions"):
-            api_endpoint = f"{api_endpoint.rstrip('/')}/v1/chat/completions"
-        
-        # 读取图像并压缩，减少base64编码后的大小
         img = cv2.imread(image_path)
         if img is None:
             raise ValueError(f"无法读取图像: {image_path}")
         
-        # 保存原始图片尺寸（不缩放，直接使用原始尺寸）
-        original_h, original_w = img.shape[:2]
-        scaled_w, scaled_h = original_w, original_h  # 不缩放，直接使用原始尺寸
-        scale = 1.0  # 缩放比例为1，不进行缩放
-        upscale = 1.0  # 放大比例为1，不进行放大
-        
-        # 不压缩图像，直接使用原始尺寸
-        # 这样大模型返回的坐标就是基于原始尺寸的，不需要进行坐标转换
-        
-        # 转换为JPEG格式，降低质量
         _, buffer = cv2.imencode('.jpg', img, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
         image_base64 = base64.b64encode(buffer).decode("utf-8")
         
-        # 构建API请求体
-        payload = {
-            "model": self.model,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/jpeg;base64,{image_base64}"
-                            }
-                        },
-                        {
-                            "type": "text",
-                            "text": self.prompt
-                        }
-                    ]
-                }
-            ],
-            "temperature": 0.0,
-            "response_format": {
-                "type": "text"
-            }
-        }
-        
-        # 发送请求
         try:
-            response = self.session.post(api_endpoint, headers=headers, json=payload, timeout=self.timeout)
+            client = OpenAI(
+                api_key=self.api_key if self.api_key else "not-needed",
+                base_url=self.model_api_url
+            )
             
-            # 记录请求详情以便调试
-            logging.info(f"发送API请求到: {api_endpoint}")
-            logging.info(f"请求头: {headers}")
-            logging.info(f"请求体: {json.dumps(payload, ensure_ascii=False)}")
+            response = client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/jpeg;base64,{image_base64}"
+                                }
+                            },
+                            {
+                                "type": "text",
+                                "text": self.prompt
+                            }
+                        ]
+                    }
+                ]
+            )
             
-            # 检查响应状态码
-            if not response.ok:
-                # 记录响应详情
-                logging.error(f"API请求失败，状态码: {response.status_code}")
-                logging.error(f"响应内容: {response.text}")
-                raise Exception(f"API请求失败，状态码: {response.status_code}，响应: {response.text[:200]}...")
+            content = response.choices[0].message.content
+            logging.info(f"API原始响应: {content}")
             
-            result = response.json()
-            logging.info(f"API响应: {json.dumps(result, ensure_ascii=False)}")
+            # 清理markdown代码块标记
+            if content.startswith('```json'):
+                content = content[7:]
+            if content.endswith('```'):
+                content = content[:-3]
+            content = content.strip()
             
-            # 解析API返回的结果
-            if "choices" in result and len(result["choices"]) > 0:
-                content = result["choices"][0]["message"]["content"]
-                # 尝试解析JSON内容
-                try:
-                    # 去除Markdown格式标记
-                    if content.startswith('```json'):
-                        content = content[7:]  # 移除开头的```json
-                    if content.endswith('```'):
-                        content = content[:-3]  # 移除结尾的```
-                    content = content.strip()  # 去除首尾空白
+            # 修复AI可能返回的错误JSON格式
+            # 1. 修复 confidence: 0:99 应该是 0.99 (冒号误写为小数点)
+            import re
+            content = re.sub(r'"confidence":\s*(\d+):(\d+)', r'"confidence": \1.\2', content)
+            # 2. 修复其他可能的数字格式错误 (如 1:5 应该是 1.5)
+            content = re.sub(r':\s*(\d+):(\d+)(?![\d\s]*\])', r': \1.\2', content)
+            
+            # 3. 修复截断的JSON（AI模型输出被截断）
+            # 尝试直接解析，如果失败则修复截断问题
+            try:
+                result_json = json.loads(content)
+            except json.JSONDecodeError:
+                logging.warning("JSON解析失败，尝试修复截断的JSON...")
+                
+                # 策略1：如果以 '[' 开头但不以 ']' 结尾，说明是数组被截断
+                if content.strip().startswith('[') and not content.strip().endswith(']'):
+                    # 找到最后一个完整的对象结束位置
+                    # 从后向前搜索 '}]' 或 '},' 模式
+                    last_complete = -1
+                    for i in range(len(content) - 2, 0, -1):
+                        if content[i] == '}' and (i + 1 < len(content) and content[i+1] in [']', ',']):
+                            last_complete = i + 1
+                            break
                     
-                    # 解析JSON结果
-                    result_json = json.loads(content)
-                    
-                    # 确保返回的是包含detections键的字典
-                    if isinstance(result_json, dict):
-                        if "detections" not in result_json:
-                            result_json["detections"] = []
-                        elif not isinstance(result_json["detections"], list):
-                            result_json["detections"] = [result_json["detections"]]
+                    if last_complete > 0:
+                        fixed_content = content[:last_complete] + ']'
+                        logging.info(f"修复截断的JSON数组，原长度: {len(content)}, 修复后长度: {len(fixed_content)}")
+                        content = fixed_content
                     else:
-                        result_json = {"detections": []}
-                    
-                    # 将检测到的坐标从缩放后的尺寸转换回原始图片尺寸
-                    for detection in result_json["detections"]:
-                        if "bbox" in detection:
-                            bbox = detection["bbox"]
-                            if len(bbox) == 4:
-                                x1, y1, x2, y2 = map(float, bbox)
-                                
-                                # 如果图片被缩小了，则检测框需要等比放大
-                                # upscale = 1.0 / scale
-                                x1 = int(x1 * upscale)
-                                y1 = int(y1 * upscale)
-                                x2 = int(x2 * upscale)
-                                y2 = int(y2 * upscale)
-                                
-                                detection["bbox"] = [x1, y1, x2, y2]
-                    
-                    return result_json
-                except json.JSONDecodeError:
-                    error_msg = f"无法解析模型返回的JSON: {content}"
-                    logging.error(error_msg)
-                    raise Exception(error_msg)
+                        # 备用策略：找到最后一个完整的 '}' 位置
+                        last_brace = content.rfind('}')
+                        if last_brace > 0:
+                            # 检查这个 '}' 后面是否有完整的 bbox 数组
+                            preceding_text = content[:last_brace+1]
+                            if '"bbox":' in preceding_text:
+                                fixed_content = preceding_text + ']'
+                                logging.info(f"备用策略修复JSON数组")
+                                content = fixed_content
+                            else:
+                                raise ValueError("无法找到完整的JSON对象边界")
+                        else:
+                            raise ValueError("无法修复截断的JSON")
+                
+                # 再次尝试解析
+                try:
+                    result_json = json.loads(content)
+                except json.JSONDecodeError as e2:
+                    logging.error(f"修复后仍然无法解析: {str(e2)}")
+                    raise
             
-            return {"detections": []}
-        except requests.exceptions.ConnectionError as e:
-            error_msg = f"无法连接到API服务器: {str(e)}. 请检查API地址是否正确，服务器是否正在运行。"
-            logging.error(error_msg)
-            raise Exception(error_msg)
-        except requests.exceptions.Timeout as e:
-            error_msg = f"API请求超时: {str(e)}. 请检查网络连接或增加超时时间。"
-            logging.error(error_msg)
-            raise Exception(error_msg)
-        except requests.exceptions.RequestException as e:
-            error_msg = f"API请求异常: {str(e)}"
-            logging.error(error_msg)
+            logging.info(f"JSON解析成功，类型: {type(result_json)}")
+            if isinstance(result_json, list):
+                logging.info(f"数组长度: {len(result_json)}")
+            elif isinstance(result_json, dict):
+                logging.info(f"对象键: {list(result_json.keys())}")
+            
+            # 处理不同格式的响应
+            if isinstance(result_json, list):
+                # 如果直接返回数组，包装成标准格式
+                logging.info("检测到数组格式，转换为标准格式")
+                result_json = {"detections": result_json}
+            elif isinstance(result_json, dict):
+                # 如果返回对象但没有detections字段，尝试兼容处理
+                if "detections" not in result_json:
+                    logging.info("未找到detections字段，尝试其他字段名")
+                    # 检查是否有其他常见字段名
+                    for key in ["objects", "results", "predictions", "annotations"]:
+                        if key in result_json and isinstance(result_json[key], list):
+                            logging.info(f"找到替代字段: {key}")
+                            result_json["detections"] = result_json[key]
+                            break
+                    else:
+                        # 如果都没有，创建空数组
+                        logging.warning("未找到任何检测数据字段")
+                        result_json["detections"] = []
+                elif not isinstance(result_json["detections"], list):
+                    # 如果detections不是列表，转换为列表
+                    logging.info("detections不是列表，转换为列表")
+                    result_json["detections"] = [result_json["detections"]]
+            else:
+                # 其他类型，创建空结果
+                logging.warning(f"未知的JSON类型: {type(result_json)}")
+                result_json = {"detections": []}
+            
+            return result_json
+        except json.JSONDecodeError as e:
+            error_msg = f"无法解析模型返回的JSON: {content[:500]}..."  # 只显示前500字符
+            logging.error(f"JSON解析错误: {str(e)}")
+            logging.error(f"JSON内容预览: {content[:200]}")
             raise Exception(error_msg)
         except Exception as e:
             error_msg = f"分析图像失败: {str(e)}"
             logging.error(f"分析图像 {image_path} 失败: {e}")
-            logging.error(f"使用的API端点: {api_endpoint}")
             raise Exception(error_msg)
     
     def render_detections(self, image_path: str, detections: List[Dict[str, Any]]) -> str:

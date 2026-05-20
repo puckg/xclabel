@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿
 let currentImage = null;
 let currentAnnotations = [];
 let classes = [];
@@ -47,11 +47,17 @@ function setupEventListeners() {
     // 导航按钮
     document.getElementById('openFolderBtn').addEventListener('click', showDatasetModal);
     document.getElementById('exportBtn').addEventListener('click', showExportModal);
+    document.getElementById('fileManagerBtn').addEventListener('click', function() {
+        showFileManagerModal();
+    });
     document.getElementById('settingsBtn').addEventListener('click', showSettingsModal);
+    document.getElementById('trainingBtn').addEventListener('click', function() {
+        window.location.href = '/training';
+    });
     document.getElementById('clearAnnotationBtn').addEventListener('click', clearCurrentAnnotations);
     // AI配置按钮
     document.getElementById('aiConfigBtn').addEventListener('click', function() {
-        window.location.href = '/ai-config';
+        showAiConfigModal();
     });
     document.getElementById('saveAnnotationBtn').addEventListener('click', saveAnnotations);
     
@@ -92,16 +98,8 @@ function setupEventListeners() {
     // 编辑类别表单事件
     document.getElementById('editClassForm').addEventListener('submit', handleEditClass);
     
-    // YOLO11安装和卸载按钮事件
-    document.getElementById('installYolo11Btn').addEventListener('click', installYolo11);
-    document.getElementById('uninstallYolo11Btn').addEventListener('click', uninstallYolo11);
-    
-    // YOLO11模型管理按钮事件
-    document.getElementById('downloadModelsBtn').addEventListener('click', downloadModels);
-    document.getElementById('refreshModelsBtn').addEventListener('click', refreshModels);
-    
-    // YOLO11模型拖放事件
-    setupModelDropZoneEvents();
+    // 设置弹框取消按钮
+    document.getElementById('cancelSettingsBtn').addEventListener('click', closeSettingsModal);
     
     // 快捷键
     document.addEventListener('keydown', handleKeyDown);
@@ -1768,12 +1766,38 @@ function handleDrop(e) {
 }
 
 // 显示设置模态框
+// 设置模态框关闭事件
 function showSettingsModal() {
     document.getElementById('settingsModal').style.display = 'block';
-    // 检查YOLO11安装状态并更新UI
-    checkYolo11InstallStatus();
-    // 刷新模型列表
-    refreshModels();
+}
+
+// 关闭设置模态框
+function closeSettingsModal() {
+    document.getElementById('settingsModal').style.display = 'none';
+}
+
+// 显示AI配置弹框
+function showAiConfigModal() {
+    const modal = document.getElementById('aiConfigModal');
+    modal.style.display = 'block';
+}
+
+// 关闭AI配置弹框
+function closeAiConfigModal() {
+    const modal = document.getElementById('aiConfigModal');
+    modal.style.display = 'none';
+}
+
+// 显示文件管理弹框
+function showFileManagerModal() {
+    const modal = document.getElementById('fileManagerModal');
+    modal.style.display = 'block';
+}
+
+// 关闭文件管理弹框
+function closeFileManagerModal() {
+    const modal = document.getElementById('fileManagerModal');
+    modal.style.display = 'none';
 }
 
 // 处理导出表单提交
@@ -1892,8 +1916,8 @@ function handleSettingsSave(e) {
     };
     localStorage.setItem('xclabelSettings', JSON.stringify(settings));
     
-    showToast('设置已保存');
-    document.getElementById('settingsModal').style.display = 'none';
+    showToast('设置已保存', 'success');
+    closeSettingsModal();
     
     // 重新加载快捷键设置
     loadShortcutSettings();

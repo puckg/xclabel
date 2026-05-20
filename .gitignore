@@ -2,8 +2,10 @@
 .idea/
 # vs
 .vs
-plugins
+
 uploads
+runs
+tmp
 dist
 build
 venv
