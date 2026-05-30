@@ -736,31 +736,75 @@
                         </div>
                     </div>
 
-                    <!-- 数据集上传 -->
+                    <!-- 数据集配置 -->
                     <div class="form-group">
-                        <label><i class="fas fa-database"></i> 数据集管理</label>
+                        <label><i class="fas fa-database"></i> 数据集配置</label>
                         
-                        <!-- 已上传的数据集列表 -->
-                        <div id="datasetList" class="dataset-list">
-                            <p style="text-align: center; color: #868e96; padding: 20px;">暂无数据集</p>
+                        <!-- 图片目录 -->
+                        <div class="form-group" style="margin-bottom: 8px;">
+                            <label for="imageDirInput" style="font-size: 12px;">图片目录</label>
+                            <div style="display: flex; gap: 8px;">
+                                <input type="text" id="imageDirInput" placeholder="选择图片目录..." readonly style="flex: 1; background: #f7fafc;">
+                                <button type="button" class="btn btn-secondary" onclick="browseImageDir()" style="flex: none; width: 36px; min-width: 36px; height: 38px; padding: 0; font-size: 14px; line-height: 1;">
+                                    <i class="fas fa-folder-open"></i>
+                                </button>
+                            </div>
                         </div>
                         
-                        <!-- 上传区域 -->
-                        <div class="upload-zone" id="datasetUploadZone" style="margin-top: 12px;">
-                            <i class="fas fa-cloud-upload-alt"></i>
-                            <div class="upload-text">点击或拖拽上传新数据集</div>
-                            <div class="upload-hint">支持从标注页面导出的YOLO格式ZIP文件</div>
-                            <input type="file" id="datasetFileInput" accept=".zip" style="display: none;">
+                        <!-- 标注目录 -->
+                        <div class="form-group" style="margin-bottom: 8px;">
+                            <label for="labelDirInput" style="font-size: 12px;">标注目录</label>
+                            <div style="display: flex; gap: 8px;">
+                                <input type="text" id="labelDirInput" placeholder="选择标注目录..." readonly style="flex: 1; background: #f7fafc;">
+                                <button type="button" class="btn btn-secondary" onclick="browseLabelDir()" style="flex: none; width: 36px; min-width: 36px; height: 38px; padding: 0; font-size: 14px; line-height: 1;">
+                                    <i class="fas fa-folder-open"></i>
+                                </button>
+                            </div>
                         </div>
                         
-                        <small>上传的数据集会保留，删除后才消失</small>
+                        <!-- 类别名称 -->
+                        <div class="form-group" style="margin-bottom: 8px;">
+                            <label for="classesInput" style="font-size: 12px;">类别名称 (逗号分隔，如: person,car,dog)</label>
+                            <div style="display: flex; gap: 8px;">
+                                <input type="text" id="classesInput" placeholder="person,car,dog" style="flex: 1;">
+                                <button type="button" class="btn btn-secondary" onclick="uploadClassesFile()" style="flex: none; width: 36px; min-width: 36px; height: 38px; padding: 0; font-size: 14px; line-height: 1;" title="从txt文件导入类别">
+                                    <i class="fas fa-file-upload"></i>
+                                </button>
+                                <input type="file" id="classesFileInput" accept=".txt" style="display: none;">
+                            </div>
+                            <small style="font-size: 11px; color: #718096;">留空则训练时自动从标注文件提取，或上传txt文件导入</small>
+                        </div>
+                        
+                        <!-- 数据集划分比例 -->
+                        <div class="form-row" style="margin-bottom: 8px;">
+                            <div class="form-group">
+                                <label for="trainRatio" style="font-size: 12px;">训练集比例</label>
+                                <input type="number" id="trainRatio" value="0.8" min="0" max="1" step="0.1">
+                            </div>
+                            <div class="form-group">
+                                <label for="valRatio" style="font-size: 12px;">验证集比例</label>
+                                <input type="number" id="valRatio" value="0.2" min="0" max="1" step="0.1">
+                            </div>
+                        </div>
+                        
+                        <!-- 验证按钮 -->
+                        <button type="button" class="btn btn-secondary" onclick="validateDatasetConfig()" style="width: 100%; margin-bottom: 8px;">
+                            <i class="fas fa-check-circle"></i> 验证配置
+                        </button>
+                        
+                        <!-- 数据集状态信息 -->
+                        <div id="datasetStatus" style="display: none; background: #f7fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px; font-size: 12px;">
+                            <div id="datasetStats" style="color: #4a5568;"></div>
+                        </div>
+                        
+                        <small style="font-size: 11px; color: #718096;">训练时将自动划分训练集和验证集</small>
                     </div>
 
                     <!-- 选择预训练模型 -->
                     <div class="form-group">
                         <label for="modelSelect"><i class="fas fa-cube"></i> 选择预训练模型</label>
                         <div style="display: flex; gap: 8px;">
-                            <select id="modelSelect" style="flex: 1;">
+                            <select id="modelSelect" onchange="selectedModel=this.value" style="flex: 1;">
                                 <option value="">请先刷新模型列表</option>
                             </select>
                             <button type="button" class="btn btn-secondary" onclick="refreshModels()" style="flex: none; width: 36px; min-width: 36px; height: 38px; padding: 0; font-size: 14px; line-height: 1;">
@@ -813,6 +857,22 @@
                                 <option value="Adam">Adam</option>
                                 <option value="AdamW">AdamW</option>
                             </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label><i class="fas fa-th"></i> Mosaic数据增强</label>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="mosaic">Mosaic概率</label>
+                                    <input type="number" id="mosaic" value="1.0" min="0" max="1" step="0.1">
+                                    <small>0=关闭, 1.0=全量启用</small>
+                                </div>
+                                <div class="form-group">
+                                    <label for="closeMosaic">关闭轮数</label>
+                                    <input type="number" id="closeMosaic" value="10" min="0" max="100">
+                                    <small>最后N轮关闭Mosaic</small>
+                                </div>
+                            </div>
                         </div>
 
                         <div class="form-group">
@@ -976,6 +1036,100 @@
                             </div>
                         </div>
                     </div>
+
+                    <!-- ONNX模型导出 -->
+                    <h4 style="font-size: 14px; color: #4a5568; margin-bottom: 14px; font-weight: 500; margin-top: 20px;">
+                        <i class="fas fa-file-export"></i> ONNX模型导出
+                    </h4>
+                    <div id="onnxExportSection">
+                        <!-- 上传自定义PT模型 -->
+                        <div class="form-group">
+                            <label><i class="fas fa-upload"></i> 上传自定义PT模型</label>
+                            <div class="upload-zone" id="customModelUploadZone" style="padding: 12px; margin-bottom: 8px;">
+                                <i class="fas fa-cloud-upload-alt" style="font-size: 20px;"></i>
+                                <div class="upload-text" style="font-size: 12px;">点击或拖拽上传自定义.pt模型</div>
+                                <input type="file" id="customModelFileInput" accept=".pt" style="display: none;">
+                            </div>
+                            <div id="customModelList" style="max-height: 80px; overflow-y: auto;">
+                                <p style="text-align: center; color: #868e96; padding: 8px; font-size: 11px;">暂无自定义模型</p>
+                            </div>
+                        </div>
+
+                        <!-- 选择要导出的PT模型 -->
+                        <div class="form-group">
+                            <label for="onnxModelSelect"><i class="fas fa-cube"></i> 选择PT模型</label>
+                            <div style="display: flex; gap: 8px;">
+                                <select id="onnxModelSelect" onchange="updateExportBtnState()" style="flex: 1;">
+                                    <option value="">请刷新模型列表</option>
+                                </select>
+                                <button type="button" class="btn btn-secondary" onclick="refreshOnnxModels()" style="flex: none; width: 36px; min-width: 36px; height: 38px; padding: 0; font-size: 14px; line-height: 1;">
+                                    <i class="fas fa-sync-alt"></i>
+                                </button>
+                            </div>
+                            <small>支持预训练模型、已训练模型和自定义上传模型</small>
+                        </div>
+
+                        <!-- 导出参数 -->
+                        <div class="form-group">
+                            <label><i class="fas fa-sliders-h"></i> 导出参数</label>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="onnxImgsz">输入尺寸</label>
+                                    <input type="number" id="onnxImgsz" value="640" min="320" max="1280" step="32">
+                                </div>
+                                <div class="form-group">
+                                    <label for="onnxOpset">Opset版本</label>
+                                    <input type="number" id="onnxOpset" value="12" min="9" max="17">
+                                </div>
+                            </div>
+                            <div class="form-group" style="margin-top: 8px;">
+                                <label>
+                                    <input type="checkbox" id="onnxSimplify" checked> 
+                                    简化模型 (simplify)
+                                </label>
+                            </div>
+                            <div class="form-group" style="margin-top: 4px;">
+                                <label>
+                                    <input type="checkbox" id="onnxDynamic"> 
+                                    动态输入尺寸 (dynamic)
+                                </label>
+                            </div>
+                            <div class="form-group" style="margin-top: 4px;">
+                                <label>
+                                    <input type="checkbox" id="onnxHalf"> 
+                                    FP16半精度 (half)
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- 导出按钮 -->
+                        <div class="btn-group">
+                            <button class="btn btn-primary" id="exportOnnxBtn" onclick="exportToOnnx()" disabled>
+                                <i class="fas fa-file-export"></i> 导出ONNX
+                            </button>
+                        </div>
+
+                        <!-- 导出进度 -->
+                        <div id="onnxExportProgress" style="display: none; margin-top: 12px;">
+                            <div style="display: flex; justify-content: space-between; font-size: 12px; color: #718096;">
+                                <span id="onnxExportStatus">导出中...</span>
+                                <span id="onnxExportPercent">0%</span>
+                            </div>
+                            <div class="progress-bar" style="margin-top: 4px;">
+                                <div class="progress-fill" id="onnxExportBar" style="width: 0%;"></div>
+                            </div>
+                        </div>
+
+                        <!-- 已导出的ONNX模型列表 -->
+                        <div style="margin-top: 16px;">
+                            <h4 style="font-size: 13px; color: #4a5568; margin-bottom: 8px; font-weight: 500;">
+                                <i class="fas fa-list"></i> 已导出的ONNX模型
+                            </h4>
+                            <div id="onnxModelList" class="model-list" style="min-height: 60px;">
+                                <p style="text-align: center; color: #868e96; padding: 12px; font-size: 12px;">暂无已导出的ONNX模型</p>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -994,17 +1148,22 @@
         let selectedTrainedModel = '';
         let initialCheckDone = false;
         let elapsedTimer = null;
+        let datasetConfig = null;
+        let browseModalCallback = null;
 
         // 初始化
         document.addEventListener('DOMContentLoaded', function() {
             initSocketIO();
-            setupDatasetUpload();
             setupTestImageUpload();
-            loadUploadedDatasets();
+            loadDatasetConfig();
             loadEnvStatus();
             refreshModels();
             loadAvailableModels();
             checkActiveTraining();
+            setupCustomModelUpload();
+            loadCustomModelList();
+            refreshOnnxModels();
+            loadOnnxModelList();
         });
 
         // 初始化SocketIO
@@ -1036,6 +1195,60 @@
             // 监听训练错误
             socket.on('training_error', function(data) {
                 onTrainingError(data);
+            });
+
+            // 监听ONNX导出日志
+            socket.on('onnx_export_log', function(data) {
+                addLogLine(data.message, data.level || 'info');
+            });
+
+            // 监听ONNX导出进度
+            socket.on('onnx_export_progress', function(data) {
+                const progress = data.progress || 0;
+                const status = data.status || '';
+                
+                document.getElementById('onnxExportProgress').style.display = 'block';
+                document.getElementById('onnxExportPercent').textContent = progress + '%';
+                document.getElementById('onnxExportBar').style.width = progress + '%';
+                
+                if (status) {
+                    document.getElementById('onnxExportStatus').textContent = status;
+                }
+            });
+
+            // 监听ONNX导出完成
+            socket.on('onnx_export_complete', function(data) {
+                const btn = document.getElementById('exportOnnxBtn');
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-file-export"></i> 导出ONNX';
+                
+                document.getElementById('onnxExportProgress').style.display = 'block';
+                document.getElementById('onnxExportStatus').textContent = '导出完成';
+                document.getElementById('onnxExportPercent').textContent = '100%';
+                document.getElementById('onnxExportBar').style.width = '100%';
+                
+                addLogLine('ONNX导出完成: ' + data.output_path, 'success');
+                
+                loadOnnxModelList();
+                updateExportBtnState();
+            });
+
+            // 监听ONNX导出错误
+            socket.on('onnx_export_error', function(data) {
+                const btn = document.getElementById('exportOnnxBtn');
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-file-export"></i> 导出ONNX';
+                
+                document.getElementById('onnxExportProgress').style.display = 'block';
+                document.getElementById('onnxExportStatus').textContent = '导出失败';
+                document.getElementById('onnxExportPercent').textContent = '0%';
+                document.getElementById('onnxExportBar').style.width = '0%';
+                
+                addLogLine('ONNX导出错误: ' + data.error, 'error');
+                if (data.traceback) {
+                    addLogLine(data.traceback, 'error');
+                }
+                updateExportBtnState();
             });
         }
 
@@ -1109,6 +1322,10 @@
                 deviceSelect.innerHTML = data.devices.map(d => 
                     `<option value="${d}">${d}</option>`
                 ).join('');
+                
+                if (data.cuda_available) {
+                    deviceSelect.value = 'NVIDIA-CUDA';
+                }
             })
             .catch(err => {
                 console.error('加载训练环境状态失败:', err);
@@ -1140,152 +1357,276 @@
         }
 
         // 加载已上传的数据集列表
-        function loadUploadedDatasets() {
-            fetch('/api/training/datasets')
+        function loadDatasetConfig() {
+            fetch('/api/dataset-config')
             .then(res => res.json())
             .then(data => {
                 if (data.success) {
-                    uploadedDatasets = data.datasets || [];
-                    renderDatasetList();
+                    datasetConfig = data.config || {};
+                    document.getElementById('imageDirInput').value = datasetConfig.image_dir || '';
+                    document.getElementById('labelDirInput').value = datasetConfig.label_dir || '';
+                    document.getElementById('classesInput').value = (datasetConfig.classes || []).join(',');
+                    document.getElementById('trainRatio').value = datasetConfig.train_ratio || 0.8;
+                    document.getElementById('valRatio').value = datasetConfig.val_ratio || 0.2;
                 }
             })
             .catch(err => {
-                console.error('加载数据集列表失败:', err);
+                console.error('加载数据集配置失败:', err);
             });
         }
 
-        // 渲染数据集列表
-        function renderDatasetList() {
-            const datasetList = document.getElementById('datasetList');
-            
-            if (uploadedDatasets.length === 0) {
-                datasetList.innerHTML = '<p style="text-align: center; color: #868e96; padding: 20px; font-size: 12px;">暂无数据集</p>';
-                return;
-            }
+        function saveDatasetConfig() {
+            const config = {
+                image_dir: document.getElementById('imageDirInput').value,
+                label_dir: document.getElementById('labelDirInput').value,
+                classes: document.getElementById('classesInput').value.split(',').map(c => c.trim()).filter(c => c),
+                train_ratio: parseFloat(document.getElementById('trainRatio').value),
+                val_ratio: parseFloat(document.getElementById('valRatio').value)
+            };
 
-            datasetList.innerHTML = uploadedDatasets.map((dataset, index) => `
-                <div class="dataset-item ${dataset.path === uploadedDatasetPath ? 'selected' : ''}" onclick="selectDataset(${index})">
-                    <div class="dataset-info">
-                        <div class="dataset-name">
-                            <i class="fas fa-folder-open"></i>
-                            <span>${dataset.name}</span>
-                        </div>
-                    </div>
-                    <div class="dataset-actions">
-                        <button class="btn-delete" onclick="event.stopPropagation(); deleteDataset(${index})" title="删除">
-                            <i class="fas fa-trash"></i>
-                        </button>
-                    </div>
-                </div>
-            `).join('');
-        }
-
-        // 选择数据集
-        function selectDataset(index) {
-            const dataset = uploadedDatasets[index];
-            uploadedDatasetPath = dataset.path;
-            renderDatasetList();
-            addLogLine(`已选择数据集: ${dataset.name}`, 'info');
-        }
-
-        // 删除数据集
-        function deleteDataset(index) {
-            const dataset = uploadedDatasets[index];
-            if (!confirm(`确定要删除数据集 "${dataset.name}" 吗？`)) return;
-
-            fetch('/api/training/remove-dataset', {
+            fetch('/api/dataset-config', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({dataset_path: dataset.path})
+                body: JSON.stringify(config)
             })
             .then(res => res.json())
             .then(data => {
                 if (data.success) {
-                    uploadedDatasets.splice(index, 1);
-                    if (uploadedDatasetPath === dataset.path) {
-                        uploadedDatasetPath = null;
-                    }
-                    renderDatasetList();
-                    addLogLine(`数据集已删除: ${dataset.name}`, 'warning');
+                    datasetConfig = config;
+                    addLogLine('数据集配置已保存', 'success');
                 } else {
-                    alert('删除失败: ' + data.error);
+                    alert('保存失败: ' + data.error);
                 }
             })
             .catch(err => {
-                alert('删除失败: ' + err.message);
+                alert('保存失败: ' + err.message);
             });
         }
 
-        // 设置数据集上传
-        function setupDatasetUpload() {
-            const uploadZone = document.getElementById('datasetUploadZone');
-            const fileInput = document.getElementById('datasetFileInput');
-
-            // 点击上传区域触发文件选择
-            uploadZone.addEventListener('click', function() {
-                fileInput.click();
+        function browseImageDir() {
+            showBrowseModal(function(path) {
+                document.getElementById('imageDirInput').value = path;
+                saveDatasetConfig();
             });
+        }
 
-            // 文件选择事件
-            fileInput.addEventListener('change', function(e) {
+        function browseLabelDir() {
+            showBrowseModal(function(path) {
+                document.getElementById('labelDirInput').value = path;
+                saveDatasetConfig();
+            });
+        }
+
+        function showBrowseModal(callback) {
+            browseModalCallback = callback;
+            const currentPath = '';
+            loadBrowsePath(currentPath);
+            
+            const modal = document.getElementById('browseModal');
+            if (!modal) {
+                createBrowseModal();
+            }
+            document.getElementById('browseModal').style.display = 'flex';
+        }
+
+        function createBrowseModal() {
+            const modalHtml = `
+                <div id="browseModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 10000; justify-content: center; align-items: center;">
+                    <div style="background: white; border-radius: 8px; width: 500px; max-height: 80vh; overflow: hidden;">
+                        <div style="padding: 16px; background: #f8f9fa; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center;">
+                            <h3 style="font-size: 15px; font-weight: 600; color: #2d3748;"><i class="fas fa-folder-open" style="color: #4299e1; margin-right: 8px;"></i>选择目录</h3>
+                            <button onclick="closeBrowseModal()" style="background: none; border: none; font-size: 20px; color: #718096; cursor: pointer;"><i class="fas fa-times"></i></button>
+                        </div>
+                        <div style="padding: 16px;">
+                            <div id="browseCurrentPath" style="font-size: 12px; color: #718096; margin-bottom: 8px; background: #f7fafc; padding: 8px; border-radius: 4px; border: 1px solid #e2e8f0;"></div>
+                            <div id="browseList" style="max-height: 300px; overflow-y: auto; border: 1px solid #e2e8f0; border-radius: 6px;"></div>
+                        </div>
+                        <div style="padding: 16px; background: #f8f9fa; border-top: 1px solid #e2e8f0; display: flex; gap: 8px;">
+                            <button onclick="closeBrowseModal()" style="flex: 1; padding: 10px; background: #718096; color: white; border: none; border-radius: 6px; cursor: pointer;">取消</button>
+                            <button onclick="confirmBrowseSelection()" style="flex: 1; padding: 10px; background: #4299e1; color: white; border: none; border-radius: 6px; cursor: pointer;">确认选择</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.body.insertAdjacentHTML('beforeend', modalHtml);
+        }
+
+        function loadBrowsePath(path) {
+            fetch('/api/dataset-config/browse?path=' + encodeURIComponent(path))
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    document.getElementById('browseCurrentPath').textContent = data.current_path || '我的电脑';
+                    
+                    const listDiv = document.getElementById('browseList');
+                    let html = '';
+                    
+                    if (data.is_root) {
+                        html += `<div onclick="loadBrowsePath('')" style="padding: 10px; cursor: pointer; border-bottom: 1px solid #e2e8f0; display: flex; align-items: center; gap: 8px;">
+                            <i class="fas fa-home" style="color: #718096;"></i>
+                            <span style="font-size: 13px; color: #4a5568;">我的电脑</span>
+                        </div>`;
+                    } else if (data.parent_path === '' && !data.is_root) {
+                        html += `<div onclick="loadBrowsePath('')" style="padding: 10px; cursor: pointer; border-bottom: 1px solid #e2e8f0; display: flex; align-items: center; gap: 8px;">
+                            <i class="fas fa-arrow-up" style="color: #718096;"></i>
+                            <span style="font-size: 13px; color: #4a5568;">.. (我的电脑)</span>
+                        </div>`;
+                    } else if (data.parent_path) {
+                        html += `<div onclick="loadBrowsePath('${data.parent_path.replace(/\\/g, '\\\\')}')" style="padding: 10px; cursor: pointer; border-bottom: 1px solid #e2e8f0; display: flex; align-items: center; gap: 8px;">
+                            <i class="fas fa-arrow-up" style="color: #718096;"></i>
+                            <span style="font-size: 13px; color: #4a5568;">.. (上级目录)</span>
+                        </div>`;
+                    }
+                    
+                    if (data.items && data.items.length > 0) {
+                        html += data.items.map(item => {
+                            const isDrive = item.type === 'drive';
+                            const icon = isDrive ? 'fa-hdd' : 'fa-folder';
+                            const iconColor = isDrive ? '#e53e3e' : '#4299e1';
+                            const escapedPath = item.path.replace(/\\/g, '\\\\');
+                            return `<div onclick="loadBrowsePath('${escapedPath}')" style="padding: 10px; cursor: pointer; border-bottom: 1px solid #e2e8f0; display: flex; align-items: center; gap: 8px;">
+                                <i class="fas ${icon}" style="color: ${iconColor};"></i>
+                                <span style="font-size: 13px; color: #2d3748;">${item.name}</span>
+                            </div>`;
+                        }).join('');
+                    } else {
+                        html += '<div style="padding: 20px; text-align: center; color: #a0aec0; font-size: 13px;">无子目录</div>';
+                    }
+                    
+                    listDiv.innerHTML = html;
+                } else {
+                    alert('加载目录失败: ' + data.error);
+                }
+            })
+            .catch(err => {
+                alert('加载目录失败: ' + err.message);
+            });
+        }
+
+        function closeBrowseModal() {
+            document.getElementById('browseModal').style.display = 'none';
+            browseModalCallback = null;
+        }
+
+        function confirmBrowseSelection() {
+            const path = document.getElementById('browseCurrentPath').textContent;
+            if (!path || path === '我的电脑') {
+                alert('请选择一个具体的目录');
+                return;
+            }
+            if (browseModalCallback) {
+                browseModalCallback(path);
+            }
+            closeBrowseModal();
+        }
+
+        function uploadClassesFile() {
+            const fileInput = document.getElementById('classesFileInput');
+            fileInput.click();
+            
+            fileInput.onchange = function(e) {
                 const file = e.target.files[0];
                 if (file) {
-                    handleDatasetUpload(file);
+                    handleClassesFileUpload(file);
                 }
-            });
-
-            // 拖拽上传
-            uploadZone.addEventListener('dragover', function(e) {
-                e.preventDefault();
-                uploadZone.classList.add('drag-over');
-            });
-
-            uploadZone.addEventListener('dragleave', function(e) {
-                e.preventDefault();
-                uploadZone.classList.remove('drag-over');
-            });
-
-            uploadZone.addEventListener('drop', function(e) {
-                e.preventDefault();
-                uploadZone.classList.remove('drag-over');
-                
-                const file = e.dataTransfer.files[0];
-                if (file && file.name.endsWith('.zip')) {
-                    handleDatasetUpload(file);
-                } else {
-                    alert('请上传ZIP格式的数据集文件！');
-                }
-            });
+                fileInput.value = '';
+            };
         }
 
-        // 处理数据集上传
-        function handleDatasetUpload(file) {
+        function handleClassesFileUpload(file) {
             const formData = new FormData();
-            formData.append('dataset', file);
+            formData.append('classes_file', file);
 
-            fetch('/api/training/upload-dataset', {
+            fetch('/api/dataset-config/upload-classes', {
                 method: 'POST',
                 body: formData
             })
             .then(res => res.json())
             .then(data => {
                 if (data.success) {
-                    addLogLine(`数据集上传成功: ${file.name}`, 'success');
-                    // 重新加载数据集列表
-                    loadUploadedDatasets();
+                    const classes = data.classes || [];
+                    document.getElementById('classesInput').value = classes.join(',');
+                    addLogLine(`已从文件导入 ${data.count} 个类别: ${classes.join(', ')}`, 'success');
+                    saveDatasetConfig();
                 } else {
-                    alert('上传失败: ' + data.error);
+                    alert('导入失败: ' + data.error);
                 }
             })
             .catch(err => {
-                alert('上传失败: ' + err.message);
+                alert('导入失败: ' + err.message);
             });
         }
 
-        // 开始训练
+        function validateDatasetConfig() {
+            const config = {
+                image_dir: document.getElementById('imageDirInput').value,
+                label_dir: document.getElementById('labelDirInput').value,
+                classes: document.getElementById('classesInput').value.split(',').map(c => c.trim()).filter(c => c)
+            };
+
+            fetch('/api/dataset-config/validate', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(config)
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    const statusDiv = document.getElementById('datasetStatus');
+                    const statsDiv = document.getElementById('datasetStats');
+                    statusDiv.style.display = 'block';
+                    
+                    if (data.valid) {
+                        statusDiv.style.borderColor = '#9ae6b4';
+                        statusDiv.style.background = '#c6f6d5';
+                    } else {
+                        statusDiv.style.borderColor = '#fc8181';
+                        statusDiv.style.background = '#fed7d7';
+                    }
+                    
+                    let html = '';
+                    if (data.errors && data.errors.length > 0) {
+                        html += '<div style="color: #e53e3e; margin-bottom: 8px;"><i class="fas fa-times-circle"></i> ' + data.errors.join('<br>') + '</div>';
+                    }
+                    if (data.warnings && data.warnings.length > 0) {
+                        html += '<div style="color: #dd6b20; margin-bottom: 8px;"><i class="fas fa-exclamation-triangle"></i> ' + data.warnings.join('<br>') + '</div>';
+                    }
+                    
+                    const stats = data.stats || {};
+                    html += `<div style="margin-top: 8px;">
+                        <div><i class="fas fa-image" style="color: #4299e1;"></i> 图片总数: ${stats.total_images || 0}</div>
+                        <div><i class="fas fa-file-alt" style="color: #48bb78;"></i> 标注总数: ${stats.total_labels || 0}</div>
+                        <div><i class="fas fa-link" style="color: #667eea;"></i> 匹配对数: ${stats.matched_pairs || 0}</div>
+                    </div>`;
+                    
+                    statsDiv.innerHTML = html;
+                    
+                    if (data.valid) {
+                        saveDatasetConfig();
+                        addLogLine('数据集配置验证通过', 'success');
+                    } else {
+                        addLogLine('数据集配置验证失败', 'error');
+                    }
+                } else {
+                    alert('验证失败: ' + data.error);
+                }
+            })
+            .catch(err => {
+                alert('验证失败: ' + err.message);
+            });
+        }
+
         function startTraining() {
-            if (!uploadedDatasetPath) {
-                alert('请选择数据集！');
+            const imageDir = document.getElementById('imageDirInput').value;
+            const labelDir = document.getElementById('labelDirInput').value;
+
+            if (!imageDir) {
+                alert('请设置图片目录！');
+                return;
+            }
+
+            if (!labelDir) {
+                alert('请设置标注目录！');
                 return;
             }
 
@@ -1294,8 +1635,10 @@
                 return;
             }
 
+            saveDatasetConfig();
+
             const config = {
-                dataset: uploadedDatasetPath,
+                use_dataset_config: true,
                 model: selectedModel,
                 epochs: parseInt(document.getElementById('epochs').value),
                 batch_size: parseInt(document.getElementById('batchSize').value),
@@ -1303,7 +1646,9 @@
                 learning_rate: parseFloat(document.getElementById('learningRate').value),
                 optimizer: document.getElementById('optimizer').value,
                 device: document.getElementById('deviceSelect').value,
-                auto_resume: document.getElementById('autoResume').checked
+                auto_resume: document.getElementById('autoResume').checked,
+                mosaic: parseFloat(document.getElementById('mosaic').value),
+                close_mosaic: parseInt(document.getElementById('closeMosaic').value)
             };
 
             fetch('/api/training/start', {
@@ -1320,6 +1665,9 @@
                     document.getElementById('startTrainingBtn').disabled = true;
                     document.getElementById('stopTrainingBtn').disabled = false;
                     addLogLine('训练任务已启动', 'success');
+                    if (data.dataset_path) {
+                        addLogLine('数据集已自动划分: ' + data.dataset_path, 'info');
+                    }
                 } else {
                     alert('启动训练失败: ' + data.error);
                 }
@@ -1656,6 +2004,282 @@
                 runBtn.disabled = false;
                 runBtn.innerHTML = '<i class="fas fa-play"></i> 执行测试';
                 alert('请求失败: ' + err.message);
+            });
+        }
+
+        // ========== ONNX导出相关函数 ==========
+
+        // 刷新可导出的PT模型列表
+        function refreshOnnxModels() {
+            fetch('/api/onnx/models')
+            .then(res => res.json())
+            .then(data => {
+                const select = document.getElementById('onnxModelSelect');
+                if (data.success && data.models && data.models.length > 0) {
+                    select.innerHTML = data.models.map(m => {
+                        const sizeMB = (m.size / 1024 / 1024).toFixed(1);
+                        let typeLabel = '';
+                        if (m.type === 'trained') typeLabel = '[训练]';
+                        else if (m.type === 'custom') typeLabel = '[自定义]';
+                        else typeLabel = '[预训练]';
+                        return `<option value="${m.path}">${typeLabel} ${m.name} (${sizeMB} MB)</option>`;
+                    }).join('');
+                    updateExportBtnState();
+                } else {
+                    select.innerHTML = '<option value="">暂无可导出的PT模型</option>';
+                    updateExportBtnState();
+                }
+            })
+            .catch(err => {
+                console.error('刷新ONNX模型列表失败:', err);
+                addLogLine('刷新模型列表失败: ' + err.message, 'error');
+            });
+        }
+
+        // 更新导出按钮状态
+        function updateExportBtnState() {
+            const select = document.getElementById('onnxModelSelect');
+            const btn = document.getElementById('exportOnnxBtn');
+            btn.disabled = !select.value;
+        }
+
+        // 设置自定义模型上传
+        function setupCustomModelUpload() {
+            const uploadZone = document.getElementById('customModelUploadZone');
+            const fileInput = document.getElementById('customModelFileInput');
+
+            uploadZone.addEventListener('click', function() {
+                fileInput.click();
+            });
+
+            fileInput.addEventListener('change', function(e) {
+                const file = e.target.files[0];
+                if (file) {
+                    handleCustomModelUpload(file);
+                }
+            });
+
+            uploadZone.addEventListener('dragover', function(e) {
+                e.preventDefault();
+                uploadZone.classList.add('drag-over');
+            });
+
+            uploadZone.addEventListener('dragleave', function(e) {
+                e.preventDefault();
+                uploadZone.classList.remove('drag-over');
+            });
+
+            uploadZone.addEventListener('drop', function(e) {
+                e.preventDefault();
+                uploadZone.classList.remove('drag-over');
+                const file = e.dataTransfer.files[0];
+                if (file && file.name.endsWith('.pt')) {
+                    handleCustomModelUpload(file);
+                } else {
+                    alert('请上传.pt格式的模型文件！');
+                }
+            });
+        }
+
+        // 处理自定义模型上传
+        function handleCustomModelUpload(file) {
+            const formData = new FormData();
+            formData.append('model', file);
+
+            fetch('/api/onnx/upload-model', {
+                method: 'POST',
+                body: formData
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    addLogLine(`自定义模型上传成功: ${file.name}`, 'success');
+                    loadCustomModelList();
+                    refreshOnnxModels();
+                } else {
+                    alert('上传失败: ' + data.error);
+                    addLogLine('自定义模型上传失败: ' + data.error, 'error');
+                }
+            })
+            .catch(err => {
+                alert('上传失败: ' + err.message);
+            });
+
+            document.getElementById('customModelFileInput').value = '';
+        }
+
+        // 加载已上传的自定义模型列表
+        function loadCustomModelList() {
+            fetch('/api/onnx/custom-models')
+            .then(res => res.json())
+            .then(data => {
+                const listDiv = document.getElementById('customModelList');
+                if (data.success && data.models && data.models.length > 0) {
+                    listDiv.innerHTML = data.models.map(m => {
+                        const sizeMB = (m.size / 1024 / 1024).toFixed(1);
+                        return `
+                            <div style="display: flex; justify-content: space-between; align-items: center; padding: 6px 8px; background: #f7fafc; border: 1px solid #e2e8f0; border-radius: 4px; margin-bottom: 4px;">
+                                <div style="flex: 1; min-width: 0;">
+                                    <div style="font-size: 11px; font-weight: 500; color: #2d3748; display: flex; align-items: center; gap: 4px;">
+                                        <i class="fas fa-file" style="color: #48bb78;"></i>
+                                        <span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${m.name}</span>
+                                    </div>
+                                    <div style="font-size: 10px; color: #a0aec0;">${sizeMB} MB | ${m.mtime}</div>
+                                </div>
+                                <button onclick="deleteCustomModel('${m.name}')" style="background: #fed7d7; color: #e53e3e; border: 1px solid #fc8181; padding: 2px 6px; border-radius: 3px; cursor: pointer; font-size: 10px;">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            </div>
+                        `;
+                    }).join('');
+                } else {
+                    listDiv.innerHTML = '<p style="text-align: center; color: #868e96; padding: 8px; font-size: 11px;">暂无自定义模型</p>';
+                }
+            })
+            .catch(err => {
+                console.error('加载自定义模型列表失败:', err);
+            });
+        }
+
+        // 删除自定义模型
+        function deleteCustomModel(modelName) {
+            if (!confirm(`确定要删除自定义模型 "${modelName}" 吗？`)) return;
+
+            fetch('/api/onnx/delete-custom-model', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({model_name: modelName})
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    addLogLine('自定义模型已删除: ' + modelName, 'warning');
+                    loadCustomModelList();
+                    refreshOnnxModels();
+                } else {
+                    alert('删除失败: ' + data.error);
+                }
+            })
+            .catch(err => {
+                alert('删除失败: ' + err.message);
+            });
+        }
+
+        // 导出ONNX模型
+        function exportToOnnx() {
+            const modelPath = document.getElementById('onnxModelSelect').value;
+            if (!modelPath) {
+                alert('请选择要导出的PT模型');
+                return;
+            }
+
+            const config = {
+                model_path: modelPath,
+                imgsz: parseInt(document.getElementById('onnxImgsz').value),
+                simplify: document.getElementById('onnxSimplify').checked,
+                opset: parseInt(document.getElementById('onnxOpset').value),
+                dynamic: document.getElementById('onnxDynamic').checked,
+                half: document.getElementById('onnxHalf').checked
+            };
+
+            const btn = document.getElementById('exportOnnxBtn');
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 导出中...';
+
+            // 显示进度
+            document.getElementById('onnxExportProgress').style.display = 'block';
+            document.getElementById('onnxExportStatus').textContent = '正在导出...';
+            document.getElementById('onnxExportPercent').textContent = '0%';
+            document.getElementById('onnxExportBar').style.width = '0%';
+
+            fetch('/api/onnx/export', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(config)
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    addLogLine('ONNX导出任务已启动', 'info');
+                } else {
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="fas fa-file-export"></i> 导出ONNX';
+                    document.getElementById('onnxExportProgress').style.display = 'none';
+                    alert('导出失败: ' + data.error);
+                    addLogLine('ONNX导出失败: ' + data.error, 'error');
+                }
+            })
+            .catch(err => {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-file-export"></i> 导出ONNX';
+                document.getElementById('onnxExportProgress').style.display = 'none';
+                alert('请求失败: ' + err.message);
+            });
+        }
+
+        // 加载已导出的ONNX模型列表
+        function loadOnnxModelList() {
+            fetch('/api/onnx/list')
+            .then(res => res.json())
+            .then(data => {
+                const listDiv = document.getElementById('onnxModelList');
+                if (data.success && data.models && data.models.length > 0) {
+                    listDiv.innerHTML = data.models.map(m => {
+                        const sizeMB = (m.size / 1024 / 1024).toFixed(1);
+                        return `
+                            <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; background: white; border: 1px solid #e2e8f0; border-radius: 4px; margin-bottom: 6px;">
+                                <div style="flex: 1; min-width: 0;">
+                                    <div style="font-size: 12px; font-weight: 500; color: #2d3748; display: flex; align-items: center; gap: 6px;">
+                                        <i class="fas fa-file-code" style="color: #4299e1;"></i>
+                                        <span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${m.name}</span>
+                                    </div>
+                                    <div style="font-size: 10px; color: #a0aec0; margin-top: 2px;">${sizeMB} MB | ${m.mtime}</div>
+                                </div>
+                                <div style="display: flex; gap: 4px; flex-shrink: 0; margin-left: 8px;">
+                                    <button onclick="downloadOnnxModel('${m.name}')" style="background: #ebf8ff; color: #3182ce; border: 1px solid #bee3f8; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 11px; transition: all 0.2s;">
+                                        <i class="fas fa-download"></i>
+                                    </button>
+                                    <button onclick="deleteOnnxModel('${m.name}')" style="background: #fed7d7; color: #e53e3e; border: 1px solid #fc8181; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 11px; transition: all 0.2s;">
+                                        <i class="fas fa-trash"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        `;
+                    }).join('');
+                } else {
+                    listDiv.innerHTML = '<p style="text-align: center; color: #868e96; padding: 12px; font-size: 12px;">暂无已导出的ONNX模型</p>';
+                }
+            })
+            .catch(err => {
+                console.error('加载ONNX模型列表失败:', err);
+            });
+        }
+
+        // 下载ONNX模型
+        function downloadOnnxModel(filename) {
+            window.open('/api/onnx/download/' + filename, '_blank');
+        }
+
+        // 删除ONNX模型
+        function deleteOnnxModel(filename) {
+            if (!confirm(`确定要删除ONNX模型 "${filename}" 吗？`)) return;
+
+            fetch('/api/onnx/delete', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({filename: filename})
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    addLogLine('ONNX模型已删除: ' + filename, 'warning');
+                    loadOnnxModelList();
+                } else {
+                    alert('删除失败: ' + data.error);
+                }
+            })
+            .catch(err => {
+                alert('删除失败: ' + err.message);
             });
         }
     </script>
